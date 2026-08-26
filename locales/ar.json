@@ -1,0 +1,91 @@
+{
+  "app": {
+    "name": "تدقيق ملفات الدعاوى",
+    "tagline": "مراجعة المستندات وتدقيقها بالذكاء الاصطناعي"
+  },
+  "dashboard": {
+    "title": "لوحة القضايا",
+    "subtitle": "إدارة ملفات الدعاوى والخبرة المحاسبية ومتابعة اكتمال المستندات",
+    "newCase": "إنشاء ملف دعوى جديد",
+    "emptyTitle": "لا توجد ملفات دعاوى بعد",
+    "emptySubtitle": "ابدأ بإنشاء ملف دعوى جديد وتحديد قائمة المستندات المطلوبة"
+  },
+  "caseForm": {
+    "title": "إنشاء ملف دعوى جديد",
+    "subtitle": "أدخل بيانات الدعوى وحدد قائمة المستندات المطلوبة لبدء عملية التدقيق",
+    "caseNumber": "رقم الدعوى",
+    "caseTitle": "عنوان / موضوع الدعوى",
+    "caseType": "نوع الملف",
+    "caseTypeLitigation": "دعوى قضائية",
+    "caseTypeAccountingExpert": "خبرة محاسبية",
+    "court": "المحكمة / الجهة القضائية",
+    "claimantName": "اسم المدعي",
+    "respondentName": "اسم المدعى عليه",
+    "clientName": "اسم المتعامل (جهة المراسلة)",
+    "clientEmail": "البريد الإلكتروني للمتعامل",
+    "notes": "ملاحظات",
+    "requirementsTitle": "متطلبات ملف الدعوى",
+    "requirementsHint": "حدد المستندات المطلوبة من القائمة المقترحة، ويمكنك إضافة متطلبات مخصصة إضافية",
+    "addRequirement": "إضافة متطلب",
+    "submit": "إنشاء ملف الدعوى"
+  },
+  "status": {
+    "PROVIDED": "مقدم",
+    "PARTIALLY_PROVIDED": "مقدم جزئياً",
+    "MISSING": "غير مقدم",
+    "NOT_ANALYZED": "لم تتم المطابقة بعد"
+  },
+  "metrics": {
+    "total": "إجمالي المتطلبات",
+    "provided": "مقدمة بالكامل",
+    "partial": "مقدمة جزئياً",
+    "missing": "غير مقدمة"
+  },
+  "tabs": {
+    "checklist": "قائمة المتطلبات والمطابقة",
+    "documents": "المستندات المرفوعة",
+    "email": "خطاب المتعامل"
+  },
+  "documents": {
+    "dropHint": "اسحب الملفات هنا أو اضغط للاختيار",
+    "acceptedTypes": "PDF، Word، Excel، CSV، صور (PNG/JPG) — بحد أقصى 25 ميجابايت لكل ملف",
+    "download": "تنزيل",
+    "delete": "حذف",
+    "parseStatus": {
+      "PARSED": "تمت المعالجة",
+      "PENDING": "قيد المعالجة",
+      "FAILED": "فشلت المعالجة",
+      "UNSUPPORTED": "نوع غير مدعوم"
+    }
+  },
+  "checklist": {
+    "runAnalysis": "تشغيل المطابقة الذكية",
+    "addRequirement": "إضافة متطلب",
+    "resetOverride": "تعديل يدوي — إعادة للتحليل التلقائي",
+    "noRequirements": "لا توجد متطلبات محددة لهذا الملف بعد",
+    "noMatches": "لا يوجد",
+    "columnRequirement": "المتطلب",
+    "columnStatus": "الحالة",
+    "columnMatches": "المستندات المطابقة",
+    "columnNotes": "ملاحظات / تعليل الذكاء الاصطناعي"
+  },
+  "email": {
+    "generate": "إنشاء خطاب للمتعامل",
+    "regenerate": "إعادة توليد المسودة",
+    "deadlineDays": "مهلة الرد (أيام)",
+    "tone": "نبرة الخطاب",
+    "toneFormal": "رسمي",
+    "toneUrgent": "رسمي مستعجل",
+    "toneFriendly": "تذكير ودي",
+    "extraInstructions": "تعليمات إضافية (اختياري)",
+    "copy": "نسخ النص",
+    "downloadWord": "تنزيل Word",
+    "print": "طباعة / حفظ PDF",
+    "previousDrafts": "مسودات سابقة"
+  },
+  "presetCategories": {
+    "legal": "قانوني",
+    "financial": "مالي",
+    "corporate": "شركات"
+  }
+}

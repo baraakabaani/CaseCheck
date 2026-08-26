@@ -1,0 +1,126 @@
+// Prisma schema for the case-file audit application.
+// SQLite by default (zero-config, file-based); swap the datasource
+// provider/url to postgresql for a multi-user production deployment.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// A legal case / accounting-expert file being audited.
+// ---------------------------------------------------------------------------
+model Case {
+  id             String   @id @default(cuid())
+  caseNumber     String // رقم الدعوى
+  title          String // عنوان/موضوع الدعوى
+  court          String? // المحكمة / الجهة القضائية
+  caseType       String   @default("LITIGATION") // LITIGATION | ACCOUNTING_EXPERT
+  claimantName   String? // اسم المدعي
+  respondentName String? // اسم المدعى عليه
+  clientName     String? // اسم المتعامل (من نتلقى منه المستندات)
+  clientEmail    String? // البريد الإلكتروني للمتعامل
+  notes          String?
+  status         String   @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | ARCHIVED
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  requirements Requirement[]
+  documents    Document[]
+  emailDrafts  EmailDraft[]
+}
+
+// ---------------------------------------------------------------------------
+// A single required document/item in the case checklist (متطلبات الملف).
+// ---------------------------------------------------------------------------
+model Requirement {
+  id             String   @id @default(cuid())
+  caseId         String
+  case           Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  presetKey      String? // key referencing lib/presets.ts, null for fully custom items
+  labelAr        String // اسم المتطلب بالعربية
+  labelEn        String? // English label (optional, for reference)
+  category       String? // تصنيف (مالي / قانوني / شركات ...)
+  description    String? // تفاصيل إضافية (مثال: الفترة الزمنية المطلوبة)
+  periodStart    DateTime? // بداية الفترة المطلوبة إن وجدت
+  periodEnd      DateTime? // نهاية الفترة المطلوبة إن وجدت
+  isRequired     Boolean  @default(true)
+  order          Int      @default(0)
+
+  status         String   @default("NOT_ANALYZED") // PROVIDED | PARTIALLY_PROVIDED | MISSING | NOT_ANALYZED
+  aiNotes        String? // شرح/تعليل الذكاء الاصطناعي
+  aiConfidence   Float?
+  manualOverride Boolean  @default(false) // true إذا عدّل المستخدم الحالة يدوياً
+  overrideNotes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  matches RequirementMatch[]
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// An uploaded file belonging to a case.
+// ---------------------------------------------------------------------------
+model Document {
+  id             String    @id @default(cuid())
+  caseId         String
+  case           Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  fileName       String
+  storedPath     String // relative path under the uploads directory
+  mimeType       String
+  fileSize       Int
+  fileKind       String // pdf | docx | xlsx | csv | image
+  parseStatus    String    @default("PENDING") // PENDING | PARSED | FAILED | UNSUPPORTED
+  parseError     String?
+  extractedText  String? // plain-text extract used for AI matching
+  detectedTitle  String? // عنوان المستند إن أمكن استنتاجه
+  detectedDates  String? // JSON-encoded array of ISO dates found in the document
+  detectedPeriod String? // نطاق الفترة الزمنية المستنتج (نص وصفي)
+  pageCount      Int?
+  uploadedAt     DateTime  @default(now())
+
+  matches RequirementMatch[]
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// Join between a Requirement and a Document, produced by the AI matcher
+// (a requirement can be satisfied by multiple documents and vice versa).
+// ---------------------------------------------------------------------------
+model RequirementMatch {
+  id            String      @id @default(cuid())
+  requirementId String
+  requirement   Requirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  documentId    String
+  document      Document    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  confidence    Float       @default(0)
+  reasoning     String? // تعليل المطابقة
+  pageRefs      String? // مراجع الصفحات ذات الصلة، مثال: "2-4, 7"
+
+  createdAt DateTime @default(now())
+
+  @@unique([requirementId, documentId])
+}
+
+// ---------------------------------------------------------------------------
+// A generated Arabic email/letter draft requesting missing documents.
+// ---------------------------------------------------------------------------
+model EmailDraft {
+  id        String   @id @default(cuid())
+  caseId    String
+  case      Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  subject   String
+  bodyAr    String
+  deadline  DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([caseId])
+}

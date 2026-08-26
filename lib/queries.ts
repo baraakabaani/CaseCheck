@@ -12,6 +12,7 @@ export function getCaseDetail(id: string) {
       },
       documents: { orderBy: { uploadedAt: "desc" } },
       emailDrafts: { orderBy: { createdAt: "desc" } },
+      notices: { orderBy: { createdAt: "desc" } },
     },
   });
 }
@@ -20,3 +21,10 @@ export type CaseDetail = NonNullable<Awaited<ReturnType<typeof getCaseDetail>>>;
 export type RequirementDetail = CaseDetail["requirements"][number];
 export type DocumentDetail = CaseDetail["documents"][number];
 export type EmailDraftDetail = CaseDetail["emailDrafts"][number];
+export type NoticeSummary = CaseDetail["notices"][number];
+
+export function getNoticeDetail(caseId: string, noticeId: string) {
+  return prisma.notice.findFirst({ where: { id: noticeId, caseId } });
+}
+
+export type NoticeDetail = NonNullable<Awaited<ReturnType<typeof getNoticeDetail>>>;

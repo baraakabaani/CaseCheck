@@ -32,29 +32,30 @@ model Case {
   requirements Requirement[]
   documents    Document[]
   emailDrafts  EmailDraft[]
+  notices      Notice[]
 }
 
 // ---------------------------------------------------------------------------
 // A single required document/item in the case checklist (متطلبات الملف).
 // ---------------------------------------------------------------------------
 model Requirement {
-  id             String   @id @default(cuid())
-  caseId         String
-  case           Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  presetKey      String? // key referencing lib/presets.ts, null for fully custom items
-  labelAr        String // اسم المتطلب بالعربية
-  labelEn        String? // English label (optional, for reference)
-  category       String? // تصنيف (مالي / قانوني / شركات ...)
-  description    String? // تفاصيل إضافية (مثال: الفترة الزمنية المطلوبة)
-  periodStart    DateTime? // بداية الفترة المطلوبة إن وجدت
-  periodEnd      DateTime? // نهاية الفترة المطلوبة إن وجدت
-  isRequired     Boolean  @default(true)
-  order          Int      @default(0)
+  id          String    @id @default(cuid())
+  caseId      String
+  case        Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  presetKey   String? // key referencing lib/presets.ts, null for fully custom items
+  labelAr     String // اسم المتطلب بالعربية
+  labelEn     String? // English label (optional, for reference)
+  category    String? // تصنيف (مالي / قانوني / شركات ...)
+  description String? // تفاصيل إضافية (مثال: الفترة الزمنية المطلوبة)
+  periodStart DateTime? // بداية الفترة المطلوبة إن وجدت
+  periodEnd   DateTime? // نهاية الفترة المطلوبة إن وجدت
+  isRequired  Boolean   @default(true)
+  order       Int       @default(0)
 
-  status         String   @default("NOT_ANALYZED") // PROVIDED | PARTIALLY_PROVIDED | MISSING | NOT_ANALYZED
+  status         String  @default("NOT_ANALYZED") // PROVIDED | PARTIALLY_PROVIDED | MISSING | NOT_ANALYZED
   aiNotes        String? // شرح/تعليل الذكاء الاصطناعي
   aiConfidence   Float?
-  manualOverride Boolean  @default(false) // true إذا عدّل المستخدم الحالة يدوياً
+  manualOverride Boolean @default(false) // true إذا عدّل المستخدم الحالة يدوياً
   overrideNotes  String?
 
   createdAt DateTime @default(now())
@@ -69,22 +70,22 @@ model Requirement {
 // An uploaded file belonging to a case.
 // ---------------------------------------------------------------------------
 model Document {
-  id             String    @id @default(cuid())
+  id             String   @id @default(cuid())
   caseId         String
-  case           Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case           Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
   fileName       String
   storedPath     String // relative path under the uploads directory
   mimeType       String
   fileSize       Int
   fileKind       String // pdf | docx | xlsx | csv | image
-  parseStatus    String    @default("PENDING") // PENDING | PARSED | FAILED | UNSUPPORTED
+  parseStatus    String   @default("PENDING") // PENDING | PARSED | FAILED | UNSUPPORTED
   parseError     String?
   extractedText  String? // plain-text extract used for AI matching
   detectedTitle  String? // عنوان المستند إن أمكن استنتاجه
   detectedDates  String? // JSON-encoded array of ISO dates found in the document
   detectedPeriod String? // نطاق الفترة الزمنية المستنتج (نص وصفي)
   pageCount      Int?
-  uploadedAt     DateTime  @default(now())
+  uploadedAt     DateTime @default(now())
 
   matches RequirementMatch[]
 
@@ -114,12 +115,53 @@ model RequirementMatch {
 // A generated Arabic email/letter draft requesting missing documents.
 // ---------------------------------------------------------------------------
 model EmailDraft {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   caseId    String
-  case      Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case      Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
   subject   String
   bodyAr    String
   deadline  DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// A formal notice (إخطار) — e.g. "اخطار اجتماع الخبرة الأول" — notifying the
+// opposing parties' legal representatives of an expert meeting and
+// requesting documents ahead of it. Content is deterministic (no AI): it
+// follows a fixed legal letter format, rendered both as a printable
+// letterhead document and as an email.
+// ---------------------------------------------------------------------------
+model Notice {
+  id     String @id @default(cuid())
+  caseId String
+  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  noticeType  String @default("EXPERT_MEETING") // reserved for future notice types
+  noticeLabel String // مثال: "الأول" / "الثاني"
+  subjectLine String // موضوع الإخطار
+
+  referenceLetterNumber String? // رقم كتاب التكليف
+  referenceLetterDate   DateTime? // تاريخ كتاب التكليف
+
+  meetingDate      DateTime
+  meetingTimeLabel String // نص حر، مثال: "12:30 ظهراً"
+  meetingMethod    String   @default("تقنية الاتصال المرئي بواسطة تطبيق تقنية ZOOM MEETING")
+  meetingLink      String?
+  meetingId        String?
+  meetingPasscode  String?
+
+  documentsDeadlineDays Int    @default(2)
+  requestedFromLabel    String // من المطلوب منه تزويد المستندات، مثال: "وكيل المدعيان"
+
+  addressees     String // JSON: [{ lawFirmName, roleLabel, representedNames: string[] }]
+  requestedItems String // JSON: string[] — البنود المرقّمة
+
+  expertTitle              String @default("الخبير الحسابي")
+  expertName               String
+  expertRegistrationNumber String // رقم القيد وزارة العدل
+
   createdAt DateTime @default(now())
 
   @@index([caseId])

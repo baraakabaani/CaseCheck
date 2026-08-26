@@ -8,11 +8,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Loader2, Trash2 } from "lucide-react";
+import { ArrowRight, Loader2, Trash2, Plus, FileText } from "lucide-react";
 import { MetricCards } from "@/components/MetricCards";
 import { FileUploader } from "@/components/FileUploader";
 import { ChecklistTable } from "@/components/ChecklistTable";
 import { EmailPreviewModal } from "@/components/EmailPreviewModal";
+import { formatDate } from "@/lib/format";
 import type { CaseDetail } from "@/lib/queries";
 
 const CASE_TYPE_LABELS: Record<string, string> = {
@@ -106,6 +107,9 @@ export function CaseWorkspace({ caseDetail }: { caseDetail: CaseDetail }) {
             المستندات المرفوعة ({caseDetail.documents.length})
           </TabsTrigger>
           <TabsTrigger value="email">خطاب المتعامل</TabsTrigger>
+          <TabsTrigger value="notices">
+            إخطارات اجتماع الخبرة ({caseDetail.notices.length})
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="checklist">
@@ -160,6 +164,50 @@ export function CaseWorkspace({ caseDetail }: { caseDetail: CaseDetail }) {
                         {d.bodyAr}
                       </div>
                     </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="notices">
+          <Card>
+            <CardContent className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                إخطار رسمي بموعد اجتماع الخبرة موجّه إلى وكلاء الأطراف، يطلب استكمال مستندات
+                محددة قبل الموعد — بنفس تنسيق خطاب الشركة (ترويسة وعلامة مائية وتذييل)، قابل
+                للطباعة أو الإرسال كبريد إلكتروني.
+              </p>
+              <div>
+                <Button asChild>
+                  <Link href={`/cases/${caseDetail.id}/notices/new`}>
+                    <Plus className="size-4" />
+                    إنشاء إخطار جديد
+                  </Link>
+                </Button>
+              </div>
+
+              {caseDetail.notices.length > 0 && (
+                <div className="flex flex-col gap-2 border-t pt-4">
+                  <p className="text-sm font-medium">الإخطارات السابقة</p>
+                  {caseDetail.notices.map((n) => (
+                    <Link
+                      key={n.id}
+                      href={`/cases/${caseDetail.id}/notices/${n.id}`}
+                      className="flex items-center gap-3 rounded-md border p-3 text-sm hover:bg-accent/40"
+                    >
+                      <FileText className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">
+                          إخطار اجتماع الخبرة {n.noticeLabel} — {n.subjectLine}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          موعد الاجتماع: {formatDate(n.meetingDate)} · تم الإنشاء:{" "}
+                          {formatDate(n.createdAt)}
+                        </div>
+                      </div>
+                    </Link>
                   ))}
                 </div>
               )}

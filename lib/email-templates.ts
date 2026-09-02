@@ -3,7 +3,7 @@ import {
   type EmailDraftContent,
   type GenerateEmailInput,
 } from "./schemas";
-import { createGroqClient, resolveGroqApiKey, GROQ_MODEL } from "./groq-client";
+import { createAiClient, resolveAiKey, type ClientApiKeys, type ResolvedAiKey } from "./ai-client";
 
 export interface EmailCaseContext {
   caseNumber: string;
@@ -94,13 +94,13 @@ function extractJson(raw: string): unknown {
   }
 }
 
-async function callGroqForEmail(
-  apiKey: string,
+async function callAiForEmail(
+  resolved: ResolvedAiKey,
   caseCtx: EmailCaseContext,
   requirements: EmailRequirementContext[],
   options: GenerateEmailInput,
 ): Promise<EmailDraftContent> {
-  const client = createGroqClient(apiKey);
+  const client = createAiClient(resolved);
 
   const requirementsBlock = requirements
     .map((r, i) => {
@@ -129,9 +129,13 @@ ${options.extraInstructions ? `تعليمات إضافية من المستخدم
 ${requirementsBlock}`;
 
   const completion = await client.chat.completions.create({
-    model: GROQ_MODEL,
+    model: resolved.model,
     temperature: 0.4,
     max_tokens: 2048,
+    // See AiChatParams.reasoning_effort — without this, Gemini spends an
+    // unpredictable share of max_tokens on hidden thinking and can return
+    // truncated/invalid JSON.
+    reasoning_effort: resolved.provider === "gemini" ? "low" : undefined,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -154,15 +158,15 @@ export async function generateEmailDraft(
   caseCtx: EmailCaseContext,
   requirements: EmailRequirementContext[],
   options: GenerateEmailInput,
-  clientApiKey?: string | null,
+  clientKeys?: ClientApiKeys | null,
 ): Promise<EmailOutcome> {
   if (requirements.length === 0) {
     throw new Error("لا توجد مستندات ناقصة أو غير مكتملة لإنشاء خطاب بشأنها");
   }
 
-  const apiKey = resolveGroqApiKey(clientApiKey);
+  const resolved = resolveAiKey(clientKeys);
 
-  if (!apiKey) {
+  if (!resolved) {
     return {
       content: buildFallbackContent(caseCtx, requirements, options.deadlineDays),
       mode: "OFFLINE",
@@ -170,7 +174,7 @@ export async function generateEmailDraft(
   }
 
   try {
-    const content = await callGroqForEmail(apiKey, caseCtx, requirements, options);
+    const content = await callAiForEmail(resolved, caseCtx, requirements, options);
     return { content, mode: "AI" };
   } catch (err) {
     const message = err instanceof Error ? err.message : "خطأ غير معروف";

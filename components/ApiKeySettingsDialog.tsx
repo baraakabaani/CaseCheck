@@ -16,9 +16,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { KeyRound, Check } from "lucide-react";
 import {
+  clearStoredGeminiApiKey,
   clearStoredGroqApiKey,
+  getStoredGeminiApiKey,
   getStoredGroqApiKey,
+  setStoredGeminiApiKey,
   setStoredGroqApiKey,
+  subscribeToStoredGeminiApiKey,
   subscribeToStoredGroqApiKey,
 } from "@/lib/client-api-key";
 
@@ -28,40 +32,55 @@ function getServerSnapshot() {
 
 export function ApiKeySettingsDialog() {
   const [open, setOpen] = useState(false);
-  const [value, setValue] = useState("");
+  const [geminiValue, setGeminiValue] = useState("");
+  const [groqValue, setGroqValue] = useState("");
 
   // Reads localStorage reactively without an effect — matches the SSR
   // snapshot (null) on first paint, then reconciles to the real value on
   // the client, and re-renders on same-tab or cross-tab changes.
-  const storedKey = useSyncExternalStore(
+  const storedGeminiKey = useSyncExternalStore(
+    subscribeToStoredGeminiApiKey,
+    getStoredGeminiApiKey,
+    getServerSnapshot,
+  );
+  const storedGroqKey = useSyncExternalStore(
     subscribeToStoredGroqApiKey,
     getStoredGroqApiKey,
     getServerSnapshot,
   );
-  const hasStoredKey = Boolean(storedKey);
+  const hasAnyStoredKey = Boolean(storedGeminiKey || storedGroqKey);
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
-    if (next) setValue(storedKey ?? "");
+    if (next) {
+      setGeminiValue(storedGeminiKey ?? "");
+      setGroqValue(storedGroqKey ?? "");
+    }
   }
 
   function handleSave() {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      clearStoredGroqApiKey();
-      toast.success("تم حذف مفتاح API المحفوظ من هذا المتصفح");
-      setOpen(false);
-      return;
+    const trimmedGemini = geminiValue.trim();
+    if (trimmedGemini) setStoredGeminiApiKey(trimmedGemini);
+    else clearStoredGeminiApiKey();
+
+    const trimmedGroq = groqValue.trim();
+    if (trimmedGroq) setStoredGroqApiKey(trimmedGroq);
+    else clearStoredGroqApiKey();
+
+    if (trimmedGemini || trimmedGroq) {
+      toast.success("تم حفظ مفتاح API في هذا المتصفح");
+    } else {
+      toast.success("تم حذف مفاتيح API المحفوظة من هذا المتصفح");
     }
-    setStoredGroqApiKey(trimmed);
-    toast.success("تم حفظ مفتاح Groq API في هذا المتصفح");
     setOpen(false);
   }
 
   function handleClear() {
+    clearStoredGeminiApiKey();
     clearStoredGroqApiKey();
-    setValue("");
-    toast.success("تم حذف مفتاح API المحفوظ من هذا المتصفح");
+    setGeminiValue("");
+    setGroqValue("");
+    toast.success("تم حذف مفاتيح API المحفوظة من هذا المتصفح");
   }
 
   return (
@@ -69,40 +88,61 @@ export function ApiKeySettingsDialog() {
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <KeyRound className="size-4" />
-          مفتاح Groq API
-          {hasStoredKey && <Check className="size-3.5 text-emerald-600" />}
+          مفتاح الذكاء الاصطناعي
+          {hasAnyStoredKey && <Check className="size-3.5 text-emerald-600" />}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>مفتاح Groq API الخاص بك</DialogTitle>
+          <DialogTitle>مفاتيح API الخاصة بك</DialogTitle>
           <DialogDescription>
-            استخدم مفتاح Groq API الخاص بك لتفعيل المطابقة الذكية وتوليد الخطابات بالذكاء
-            الاصطناعي. يُحفظ المفتاح في متصفحك فقط (localStorage) ولا يُرسل إلا إلى خادم هذا
-            التطبيق عند تشغيل المطابقة أو توليد الخطاب.
+            استخدم مفتاح Gemini أو Groq الخاص بك لتفعيل المطابقة الذكية والتحليل الأولي وتوليد
+            الخطابات بالذكاء الاصطناعي. تُحفظ المفاتيح في متصفحك فقط (localStorage) ولا تُرسل إلا
+            إلى خادم هذا التطبيق عند تشغيل هذه الميزات.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="groqApiKey">مفتاح API</Label>
+          <Label htmlFor="geminiApiKey">
+            مفتاح Gemini API <span className="text-muted-foreground">(موصى به)</span>
+          </Label>
+          <Input
+            id="geminiApiKey"
+            type="password"
+            dir="ltr"
+            placeholder="AQ...."
+            value={geminiValue}
+            onChange={(e) => setGeminiValue(e.target.value)}
+            autoComplete="off"
+          />
+          <p className="text-xs text-muted-foreground">
+            يُستخدم أولاً عند توفره — حصة مجانية أكبر وسياق أوسع من Groq، فلا يحتاج لتقليم
+            محتوى المستندات الطويلة. احصل عليه من{" "}
+            <span dir="ltr">aistudio.google.com/app/api-keys</span>.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="groqApiKey">مفتاح Groq API (اختياري)</Label>
           <Input
             id="groqApiKey"
             type="password"
             dir="ltr"
             placeholder="gsk_..."
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
+            value={groqValue}
+            onChange={(e) => setGroqValue(e.target.value)}
             autoComplete="off"
           />
           <p className="text-xs text-muted-foreground">
-            إن تركت هذا الحقل فارغاً، سيحاول التطبيق استخدام مفتاح مُهيأ على الخادم إن وُجد،
-            وإلا سيتم اعتماد المطابقة الآلية الاحتياطية (بدون ذكاء اصطناعي) تلقائياً.
+            يُستخدم فقط إن لم يتوفر مفتاح Gemini. إن تركت كلا الحقلين فارغَين، سيحاول التطبيق
+            استخدام مفتاح مُهيأ على الخادم إن وُجد، وإلا سيتم اعتماد المطابقة الآلية الاحتياطية
+            (بدون ذكاء اصطناعي) تلقائياً.
           </p>
         </div>
 
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button variant="ghost" onClick={handleClear} disabled={!hasStoredKey}>
-            حذف المفتاح المحفوظ
+          <Button variant="ghost" onClick={handleClear} disabled={!hasAnyStoredKey}>
+            حذف المفاتيح المحفوظة
           </Button>
           <Button onClick={handleSave}>حفظ</Button>
         </DialogFooter>

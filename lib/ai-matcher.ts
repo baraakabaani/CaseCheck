@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { aiMatchResponseSchema, type AiMatchResponse, type CaseType } from "./schemas";
-import { createGroqClient, resolveGroqApiKey, GROQ_MODEL } from "./groq-client";
+import { createAiClient, resolveAiKey, type ClientApiKeys, type ResolvedAiKey } from "./ai-client";
 import { offlineMatchDocumentsToRequirements } from "./offline-matcher";
 import type { MatchDocumentInput, MatchRequirementInput } from "./matching-types";
 
@@ -16,11 +16,14 @@ export interface MatchOutcome {
   warning?: string;
 }
 
-// Groq's free "on_demand" tier caps requests at 8,000 tokens/minute
-// (prompt_tokens + max_tokens, reserved up front) — this is a *total*
-// character budget shared across all documents (see buildDocumentsBlock),
-// not a flat per-document cap, so a case with many/long documents still
-// gets a real (if partial) AI pass instead of blowing the limit outright.
+// This budget is sized for Groq's free "on_demand" tier, which caps
+// requests at 8,000 tokens/minute (prompt_tokens + max_tokens, reserved up
+// front) — it's a *total* character budget shared across all documents
+// (see buildDocumentsBlock), not a flat per-document cap, so a case with
+// many/long documents still gets a real (if partial) AI pass instead of
+// blowing the limit outright. Gemini's much larger free-tier budget and
+// ~1M token context don't need this, but the same cap is kept for it too
+// (harmless, keeps prompt sizes/latency reasonable either way).
 const TOTAL_DOCUMENT_CHARS_BUDGET = 9000; // ≈ 3,000 tokens at ~3 chars/token for Arabic-heavy text
 const MAX_DOC_CHARS_IN_PROMPT = 6000; // ceiling for any single document within that shared budget
 
@@ -136,12 +139,12 @@ function extractJson(raw: string): unknown {
   }
 }
 
-async function callGroqForMatching(
-  apiKey: string,
+async function callAiForMatching(
+  resolved: ResolvedAiKey,
   requirements: MatchRequirementInput[],
   documents: MatchDocumentInput[],
 ): Promise<{ response: AiMatchResponse; truncationNote?: string }> {
-  const client = createGroqClient(apiKey);
+  const client = createAiClient(resolved);
   const jsonSchema = JSON.stringify(z.toJSONSchema(aiMatchResponseSchema));
 
   const { block: documentsBlock, skippedCount, truncatedCount } = buildDocumentsBlock(documents);
@@ -164,12 +167,17 @@ ${documentsBlock}
 قم بمطابقة كل متطلب من المتطلبات أعلاه (بعددها بالكامل: ${requirements.length}) مع المستندات ذات الصلة، وأرجع النتيجة بصيغة JSON فقط وفق المخطط المطلوب.`;
 
   const completion = await client.chat.completions.create({
-    model: GROQ_MODEL,
+    model: resolved.model,
     temperature: 0.2,
     // Kept well below Groq's free-tier 8,000 TPM cap — Groq's rate limiter
     // reserves (prompt tokens + max_tokens) upfront, so an over-generous
     // ceiling here can trip the limit even when actual usage is far lower.
+    // (Harmless headroom for Gemini, whose budget is much larger.)
     max_tokens: 3000,
+    // See AiChatParams.reasoning_effort — without this, Gemini spends an
+    // unpredictable share of max_tokens on hidden thinking and can return
+    // truncated/invalid JSON.
+    reasoning_effort: resolved.provider === "gemini" ? "low" : undefined,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT.replace("{{JSON_SCHEMA}}", jsonSchema) },
@@ -198,15 +206,15 @@ export async function matchDocumentsToRequirements(
   requirements: MatchRequirementInput[],
   documents: MatchDocumentInput[],
   caseType: CaseType,
-  clientApiKey?: string | null,
+  clientKeys?: ClientApiKeys | null,
 ): Promise<MatchOutcome> {
   if (requirements.length === 0) {
     return { response: { results: [] }, mode: "OFFLINE" };
   }
 
-  const apiKey = resolveGroqApiKey(clientApiKey);
+  const resolved = resolveAiKey(clientKeys);
 
-  if (!apiKey) {
+  if (!resolved) {
     return {
       response: offlineMatchDocumentsToRequirements(requirements, documents, caseType),
       mode: "OFFLINE",
@@ -229,8 +237,8 @@ export async function matchDocumentsToRequirements(
   }
 
   try {
-    const { response, truncationNote } = await callGroqForMatching(
-      apiKey,
+    const { response, truncationNote } = await callAiForMatching(
+      resolved,
       requirements,
       documents,
     );

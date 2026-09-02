@@ -40,8 +40,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import type { RequirementDetail } from "@/lib/queries";
 import { REQUIREMENT_STATUSES, type RequirementStatus } from "@/lib/schemas";
 import { formatDate } from "@/lib/format";
-import { getStoredGroqApiKey } from "@/lib/client-api-key";
-import { GROQ_API_KEY_HEADER } from "@/lib/api-key-header";
+import { buildClientApiKeyHeaders } from "@/lib/client-api-key";
 
 const STATUS_SELECT_LABEL: Record<RequirementStatus, string> = {
   PROVIDED: "مقدم",
@@ -71,10 +70,9 @@ export function ChecklistTable({
   async function runAnalysis() {
     setAnalyzing(true);
     try {
-      const storedKey = getStoredGroqApiKey();
       const res = await fetch(`/api/cases/${caseId}/analyze`, {
         method: "POST",
-        headers: storedKey ? { [GROQ_API_KEY_HEADER]: storedKey } : undefined,
+        headers: buildClientApiKeyHeaders(),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "فشل تشغيل المطابقة الذكية");

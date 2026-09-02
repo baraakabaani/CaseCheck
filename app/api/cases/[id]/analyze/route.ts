@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { matchDocumentsToRequirements } from "@/lib/ai-matcher";
-import { getClientApiKeyFromRequest } from "@/lib/groq-client";
+import { getClientApiKeysFromRequest } from "@/lib/ai-client";
 import type { CaseType } from "@/lib/schemas";
 
 interface RouteParams {
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     });
   }
 
-  const clientApiKey = getClientApiKeyFromRequest(req);
+  const clientKeys = getClientApiKeysFromRequest(req);
 
   let outcome;
   try {
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         parseStatus: d.parseStatus,
       })),
       caseRecord.caseType as CaseType,
-      clientApiKey,
+      clientKeys,
     );
   } catch (err) {
     return NextResponse.json(

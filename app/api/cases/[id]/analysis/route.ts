@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { analyzeCaseFile } from "@/lib/case-analyzer";
-import { getClientApiKeyFromRequest } from "@/lib/groq-client";
+import { getClientApiKeysFromRequest } from "@/lib/ai-client";
 import type { MandateNatureOption, LitigationDegree, CaseCategory } from "@/lib/schemas";
 import { LITIGATION_DEGREE_LABELS, CASE_CATEGORY_LABELS } from "@/lib/case-intake-labels";
 
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     );
   }
 
-  const clientApiKey = getClientApiKeyFromRequest(req);
+  const clientKeys = getClientApiKeysFromRequest(req);
 
   let outcome;
   try {
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         text: d.extractedText ?? "",
         detectedDates: safeParseJson<string[]>(d.detectedDates, []),
       })),
-      clientApiKey,
+      clientKeys,
     );
   } catch (err) {
     return NextResponse.json(

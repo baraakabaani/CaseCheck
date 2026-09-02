@@ -8,7 +8,7 @@ import {
   caseAnalysisResultSchema,
   type CaseAnalysisResult,
 } from "./case-analysis-schemas";
-import { createGroqClient, resolveGroqApiKey, GROQ_MODEL } from "./groq-client";
+import { createAiClient, resolveAiKey, type ClientApiKeys, type ResolvedAiKey } from "./ai-client";
 import { offlineAnalyzeCaseFile } from "./offline-case-analyzer";
 import { MANDATE_NATURE_LABELS } from "./case-intake-labels";
 import type {
@@ -139,13 +139,13 @@ function extractJson(raw: string): unknown {
   }
 }
 
-async function callGroqForAnalysis(
-  apiKey: string,
+async function callAiForAnalysis(
+  resolved: ResolvedAiKey,
   caseCtx: CaseAnalyzerContext,
   parties: CaseAnalyzerParty[],
   documents: CaseAnalyzerDocument[],
 ): Promise<{ result: CaseAnalysisResult; truncationNote?: string }> {
-  const client = createGroqClient(apiKey);
+  const client = createAiClient(resolved);
   const jsonSchema = JSON.stringify(z.toJSONSchema(caseAnalysisResultSchema));
 
   const mandateNatureLabels = caseCtx.mandateNature
@@ -182,7 +182,7 @@ ${documentsBlock}
 قم بإعداد ملخص التحليل الأولي الكامل وفق المخطط المطلوب.`;
 
   const completion = await client.chat.completions.create({
-    model: GROQ_MODEL,
+    model: resolved.model,
     temperature: 0.3,
     // Kept well below Groq's free-tier 8,000 TPM cap — Groq's rate limiter
     // reserves (prompt tokens + max_tokens) upfront, so an over-generous
@@ -190,6 +190,10 @@ ${documentsBlock}
     // buildDocumentsBlock's total character budget is what keeps the
     // prompt itself under the cap for real multi-document cases.
     max_tokens: 2500,
+    // See AiChatParams.reasoning_effort — without this, Gemini spends an
+    // unpredictable share of max_tokens on hidden thinking and can return
+    // truncated/invalid JSON (verified live against this exact prompt).
+    reasoning_effort: resolved.provider === "gemini" ? "low" : undefined,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT.replace("{{JSON_SCHEMA}}", jsonSchema) },
@@ -217,17 +221,17 @@ export async function analyzeCaseFile(
   caseCtx: CaseAnalyzerContext,
   parties: CaseAnalyzerParty[],
   documents: CaseAnalyzerDocument[],
-  clientApiKey?: string | null,
+  clientKeys?: ClientApiKeys | null,
 ): Promise<CaseAnalysisOutcome> {
-  const apiKey = resolveGroqApiKey(clientApiKey);
+  const resolved = resolveAiKey(clientKeys);
 
-  if (!apiKey) {
+  if (!resolved) {
     return { result: offlineAnalyzeCaseFile(caseCtx, parties, documents), mode: "OFFLINE" };
   }
 
   try {
-    const { result, truncationNote } = await callGroqForAnalysis(
-      apiKey,
+    const { result, truncationNote } = await callAiForAnalysis(
+      resolved,
       caseCtx,
       parties,
       documents,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateEmailInputSchema } from "@/lib/schemas";
 import { generateEmailDraft } from "@/lib/email-templates";
-import { getClientApiKeyFromRequest } from "@/lib/groq-client";
+import { getClientApiKeysFromRequest } from "@/lib/ai-client";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const clientApiKey = getClientApiKeyFromRequest(req);
+    const clientKeys = getClientApiKeysFromRequest(req);
     const outcome = await generateEmailDraft(
       {
         caseNumber: caseRecord.caseNumber,
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         notes: r.overrideNotes ?? r.aiNotes,
       })),
       parsed.data,
-      clientApiKey,
+      clientKeys,
     );
 
     const deadline = new Date();

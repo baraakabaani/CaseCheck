@@ -8,8 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Sparkles, Loader2 } from "lucide-react";
 import { FileUploader } from "@/components/FileUploader";
-import { getStoredGroqApiKey } from "@/lib/client-api-key";
-import { GROQ_API_KEY_HEADER } from "@/lib/api-key-header";
+import { buildClientApiKeyHeaders } from "@/lib/client-api-key";
 import type { DocumentDetail } from "@/lib/queries";
 
 // إرشاد بصري فقط — لا يترتب عليه أي تصنيف يدوي عند الرفع (يقوم الذكاء
@@ -39,10 +38,9 @@ export function CaseDocumentsStep({
   async function handleAnalyze() {
     setAnalyzing(true);
     try {
-      const storedKey = getStoredGroqApiKey();
       const res = await fetch(`/api/cases/${caseId}/analysis`, {
         method: "POST",
-        headers: storedKey ? { [GROQ_API_KEY_HEADER]: storedKey } : undefined,
+        headers: buildClientApiKeyHeaders(),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "فشل تحليل ملف الدعوى");

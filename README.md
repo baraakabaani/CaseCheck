@@ -6,23 +6,23 @@ documents a client actually uploads against a checklist of required documents,
 classifying each requirement as **مقدم** (provided), **مقدم جزئياً**
 (partially provided), or **غير مقدم** (missing) — with reasoning and document
 references — and can draft a formal Arabic letter requesting whatever is
-missing. Works with an AI model (Groq) when a key is available, and falls
-back to a rule-based local matcher when it isn't — no API key is required to
-use the app.
+missing. Works with an AI model (Gemini, with Groq as an alternative) when a
+key is available, and falls back to a rule-based local matcher when it
+isn't — no API key is required to use the app.
 
 ## Stack
 
 - **Next.js 16** (App Router, TypeScript, Turbopack) — UI and API routes in one deployable app
 - **Tailwind CSS v4 + shadcn/ui**, RTL-first (`dir="rtl"`, `lang="ar"`)
 - **Prisma + SQLite** for persistence (swap the datasource for Postgres in production)
-- **Groq (`groq-sdk`, `qwen/qwen3.8-27b`)** — structured-output matching engine and Arabic email generation, with a zero-API rule-based fallback for both
-- Document parsing: `pdf-parse` (PDF), `mammoth` (DOCX), `exceljs`/`papaparse` (XLSX/CSV). Images are stored and matched by filename only — the configured Groq model is text-only, so there's no automatic OCR.
+- **Gemini (`gemini-3.6-flash`, OpenAI-compatible endpoint) or Groq (`groq-sdk`, `qwen/qwen3.8-27b`)** — structured-output matching engine, case analysis, and Arabic email generation, with a zero-API rule-based fallback for all three. Gemini is preferred whenever a key is available (see `lib/ai-client.ts`); Groq remains supported as an alternative.
+- Document parsing: `pdf-parse` (PDF), `mammoth` (DOCX), `exceljs`/`papaparse` (XLSX/CSV). Images are stored and matched by filename only — the configured AI models are text-only, so there's no automatic OCR.
 
 ## Getting started
 
 ```bash
 npm install
-cp .env.example .env   # GROQ_API_KEY is optional — see below
+cp .env.example .env   # GEMINI_API_KEY / GROQ_API_KEY are optional — see below
 npx prisma migrate dev # first run only — creates prisma/dev.db
 npm run dev
 ```
@@ -34,24 +34,33 @@ Open [http://localhost:3000](http://localhost:3000).
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | SQLite file path by default (`file:./dev.db`) |
-| `GROQ_API_KEY` | Optional. Server-side fallback key for AI matching/email drafting. |
+| `GEMINI_API_KEY` | Optional. Server-side fallback key for AI matching/analysis/email drafting — preferred over `GROQ_API_KEY` when both are set. |
+| `GEMINI_MODEL` | Optional override, defaults to `gemini-3.6-flash` |
+| `GROQ_API_KEY` | Optional. Used only when no Gemini key is available. |
 | `GROQ_MODEL` | Optional override, defaults to `qwen/qwen3.8-27b` |
 | `UPLOADS_DIR` | Local folder for uploaded case files (default `uploads`) |
 
-### Three ways to run the matching engine
+### Five ways to run the AI-backed features
 
-The app resolves an API key in this order, per request:
+The app resolves an API key in this order, per request (`lib/ai-client.ts`):
 
-1. **A key typed into the UI** (the "مفتاح Groq API" button in the header) —
-   stored in the browser's `localStorage` only, sent to this app's own API
-   routes as an `x-groq-api-key` header. Lets each user run the app on their
-   own Groq account without touching the server's `.env`.
-2. **`GROQ_API_KEY`** on the server, if no client key is provided.
-3. **Offline fallback** — if neither is set, `lib/offline-matcher.ts` runs a
-   local keyword/period-coverage heuristic instead of calling any API, and
-   the email generator falls back to a deterministic Arabic template
-   (`lib/email-templates.ts`). Every AI-backed response reports which mode
-   ran (`mode: "AI" | "OFFLINE"`), surfaced to the user as a toast.
+1. **A Gemini key typed into the UI** (the "مفتاح الذكاء الاصطناعي" button in
+   the header) — stored in the browser's `localStorage` only, sent to this
+   app's own API routes as an `x-gemini-api-key` header.
+2. **A Groq key typed into the UI** — same mechanism, `x-groq-api-key` header.
+3. **`GEMINI_API_KEY`** on the server, if no client key is provided.
+4. **`GROQ_API_KEY`** on the server, if none of the above is available.
+5. **Offline fallback** — if none of the above is set, `lib/offline-matcher.ts`
+   / `lib/offline-case-analyzer.ts` run a local keyword/period-coverage
+   heuristic instead of calling any API, and the email generator falls back
+   to a deterministic Arabic template (`lib/email-templates.ts`). Every
+   AI-backed response reports which mode ran (`mode: "AI" | "OFFLINE"`),
+   surfaced to the user as a toast.
+
+Gemini is preferred over Groq whenever both are available: it has a far
+larger free-tier token budget and a ~1M token context window, which removes
+the document-truncation tradeoff described below for most real cases. Groq
+remains fully supported as an alternative/fallback provider.
 
 ## How it works — the 4-phase intake wizard (نموذج الخبرة القضائية)
 
@@ -88,8 +97,8 @@ draft the client letter, and generate the اخطار (expert-meeting notice) —
 which is effectively this wizard's implied Phase 5 ("prepare and send the
 document request and invite parties to the first meeting").
 
-Like the checklist matcher, Phase 4 uses Groq when a key is available and
-falls back to `lib/offline-case-analyzer.ts` otherwise — but this task is
+Like the checklist matcher, Phase 4 uses Gemini/Groq when a key is available
+and falls back to `lib/offline-case-analyzer.ts` otherwise — but this task is
 generative (summarizing, drafting questions), not just keyword-matchable,
 so the offline version is honestly limited: it still produces a real
 missing-documents list (via the same keyword-coverage technique reused
@@ -113,7 +122,7 @@ components/             CaseIntakeStep1Form, CaseIntakeStep2Form,
 lib/                    case-analyzer.ts, offline-case-analyzer.ts,
                          case-analysis-schemas.ts, case-analysis-types.ts,
                          case-intake-labels.ts, ai-matcher.ts,
-                         offline-matcher.ts, groq-client.ts,
+                         offline-matcher.ts, ai-client.ts, api-key-header.ts,
                          document-parser.ts, pdf-parser.ts, email-templates.ts,
                          notice-templates.ts, notice-schemas.ts, schemas.ts,
                          presets.ts, matching-types.ts, text-normalize.ts,
@@ -134,7 +143,7 @@ otherwise it's wiped on every restart/redeploy:
 3. Set environment variables:
    - `DATABASE_URL=file:/data/prod.db`
    - `UPLOADS_DIR=/data/uploads`
-   - `GROQ_API_KEY` (optional — the app works without it, see above)
+   - `GEMINI_API_KEY` and/or `GROQ_API_KEY` (both optional — the app works without them, see above)
 4. Deploy. `npm start` runs `prisma migrate deploy` automatically before
    starting the server, so the SQLite file/schema is created on first boot.
 
@@ -151,7 +160,7 @@ otherwise it's wiped on every restart/redeploy:
   swap `lib/file-storage.ts` for object storage (S3-compatible) and
   `DATABASE_URL` for Postgres.
 - Groq's free `on_demand` tier caps requests at **8,000 tokens/minute**,
-  counted as `prompt_tokens + max_tokens` up front. The default model
+  counted as `prompt_tokens + max_tokens` up front. The default Groq model
   (`qwen/qwen3.8-27b`) was picked over the `openai/gpt-oss-*` models
   specifically for this — the gpt-oss models are reasoners that spend a
   large, unpredictable share of `max_tokens` on hidden chain-of-thought
@@ -163,7 +172,12 @@ otherwise it's wiped on every restart/redeploy:
   / `lib/case-analyzer.ts`) rather than a flat per-document limit — earlier
   documents get priority, later ones are truncated or skipped with an
   honest note in both the prompt and the returned warning. A case with
-  enough real document content can still exceed the free tier regardless;
+  enough real document content can still exceed Groq's free tier regardless;
   the request then fails over to the offline mode automatically (no
-  crash), surfaced as a warning toast. If that happens often, upgrade the
-  Groq account's tier.
+  crash), surfaced as a warning toast. **Gemini doesn't have this problem**
+  for the vast majority of real cases — its free tier's token budget is far
+  larger and its context window is ~1M tokens — which is why it's tried
+  first whenever a key is available (see `lib/ai-client.ts`); the same
+  character budget is still applied for it too, just as extra headroom
+  rather than a load-bearing constraint. If AI calls fail often on either
+  provider, add/upgrade the corresponding key.

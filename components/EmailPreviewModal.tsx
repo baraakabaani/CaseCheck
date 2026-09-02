@@ -26,8 +26,7 @@ import { Mail, Loader2, Copy, FileDown, Printer, Sparkles } from "lucide-react";
 import type { EmailDraftDetail } from "@/lib/queries";
 import { buildEmailDocxBlob, downloadBlob } from "@/lib/docx-export";
 import { formatDateTime } from "@/lib/format";
-import { getStoredGroqApiKey } from "@/lib/client-api-key";
-import { GROQ_API_KEY_HEADER } from "@/lib/api-key-header";
+import { buildClientApiKeyHeaders } from "@/lib/client-api-key";
 
 type Tone = "FORMAL" | "URGENT" | "FRIENDLY_REMINDER";
 
@@ -54,12 +53,11 @@ export function EmailPreviewModal({
   async function handleGenerate() {
     setGenerating(true);
     try {
-      const storedKey = getStoredGroqApiKey();
       const res = await fetch(`/api/cases/${caseId}/email`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(storedKey ? { [GROQ_API_KEY_HEADER]: storedKey } : {}),
+          ...buildClientApiKeyHeaders(),
         },
         body: JSON.stringify({ deadlineDays, tone, extraInstructions: extraInstructions || null }),
       });

@@ -76,16 +76,17 @@ Every case is opened through a sequential wizard (`app/cases/new` →
    appointment capacity (sole expert / committee, with committee members),
    and the nature of the accounting mandate (multi-select).
 3. **رفع ملف الدعوى والمستندات القضائية** (`/cases/[id]/setup/documents`) —
-   one unified dropzone (reuses `FileUploader.tsx` as-is) for every judicial
-   document — no manual per-file categorization; the AI classifies them in
-   the next phase.
+   5 fixed upload slots (`CaseDocumentsStep.tsx` + `DocumentSlotUploader.tsx`),
+   one per `DocCategory`: الحكم التمهيدي/قرار الندب، لائحة الدعوى، مذكرات
+   الأطراف، مستندات الأطراف وحوافظ المستندات، ومستندات قضائية أخرى. The
+   category is set at upload time (not guessed by the AI afterward) — this
+   is what drives `lib/smart-ingest.ts` (see below).
 4. **التحليل الأولي لملف الدعوى** (`/cases/[id]/setup/analysis`) —
    `lib/case-analyzer.ts` reads every uploaded document and produces a case
    summary, the expert mandate broken into tasks, a received-documents
-   table (each document auto-classified and matched to the party that
-   submitted it), a missing-documents list, unclear/contradictory points,
-   and suggested questions per party — reviewed on one screen
-   (`CaseAnalysisReview.tsx`) and approved.
+   table (matched to the party that submitted it), a missing-documents
+   list, unclear/contradictory points, and suggested questions per party —
+   reviewed on one screen (`CaseAnalysisReview.tsx`) and approved.
 
 **Approving Phase 4 materializes its missing-documents list into ordinary
 `Requirement` rows** — the pre-existing checklist (`ChecklistTable.tsx`),
@@ -105,6 +106,38 @@ missing-documents list (via the same keyword-coverage technique reused
 from the checklist presets) but leaves the summary/mandate/questions as
 prompts for the expert to fill in manually, and says so in the UI.
 
+### نظام الضغط الذكي — local pre-processing before any AI call
+
+`lib/smart-ingest.ts` runs on every document *before* it reaches an LLM
+(both Phase 4's analysis and the checklist matcher use it) — no raw
+document text is ever sent as-is. Each of the 5 upload-slot categories gets
+a purpose-built, budget-capped extraction instead of an arbitrary prefix of
+the file:
+
+- **الحكم التمهيدي / قرار الندب** — header (court/case number/date) +
+  the operative section (found via markers like `حكمت المحكمة`, `وندبت`),
+  capped at 600 tokens.
+- **لائحة / صحيفة الدعوى** — opening summary + the prayer-for-relief
+  section (`بناءً عليه`, `يلتمس المدعي`, `الطلبات`), capped at 500 tokens.
+- **مذكرات الأطراف** — intro + concluding arguments, 400 tokens per memo.
+- **مستندات الأطراف وحوافظ المستندات** — for spreadsheet/CSV bank
+  statements and ledgers, local arithmetic (no LLM call) sums the
+  credit/debit columns and reads the opening/closing balance directly from
+  the parsed rows; for audited financial statements, the Balance
+  Sheet/Income Statement/Auditor's Opinion sections are extracted by
+  marker. Every computed figure is labeled "محسوبة آلياً" (never presented
+  as certain). 600 tokens shared across all documents in this slot.
+- **مستندات قضائية أخرى** — first ~1,000 characters, 300 tokens per doc.
+
+All of this is capped by a ~4,500-token total pool processed in priority
+order, so a case with many/large documents degrades gracefully (lower-
+priority items get skipped with an honest note) instead of the previous
+behavior — dumping raw truncated text — which was the direct cause of
+"Expected ',' or ']' after array element in JSON" errors on real
+multi-document cases (the model would run out of budget mid-response).
+`lib/ai-matcher.ts` reuses the same per-document digest function
+(`buildSingleDocumentDigest`) for the same reason.
+
 ## Project layout
 
 ```
@@ -115,13 +148,13 @@ app/                    RTL App Router pages + API routes
   cases/[id]/notices/    Expert-meeting notice (إخطار) creation + view
   api/cases/...          REST endpoints backing all of the above
 components/             CaseIntakeStep1Form, CaseIntakeStep2Form,
-                        CaseDocumentsStep, CaseAnalysisReview, WizardSteps,
-                        FileUploader, ChecklistTable, EmailPreviewModal,
-                        NoticeForm, NoticeDocument, MetricCards,
-                        ApiKeySettingsDialog, ...
+                        CaseDocumentsStep, DocumentSlotUploader,
+                        CaseAnalysisReview, WizardSteps, FileUploader,
+                        ChecklistTable, EmailPreviewModal, NoticeForm,
+                        NoticeDocument, MetricCards, ApiKeySettingsDialog, ...
 lib/                    case-analyzer.ts, offline-case-analyzer.ts,
                          case-analysis-schemas.ts, case-analysis-types.ts,
-                         case-intake-labels.ts, ai-matcher.ts,
+                         case-intake-labels.ts, ai-matcher.ts, smart-ingest.ts,
                          offline-matcher.ts, ai-client.ts, api-key-header.ts,
                          document-parser.ts, pdf-parser.ts, email-templates.ts,
                          notice-templates.ts, notice-schemas.ts, schemas.ts,
@@ -152,6 +185,21 @@ otherwise it's wiped on every restart/redeploy:
 - Scanned PDFs with no text layer are flagged (`likelyScanned`) for manual
   review rather than silently failing. Image uploads carry no extracted
   text at all (see Stack above) and are matched by filename only.
+- `lib/pdf-parser.ts` explicitly points pdfjs-dist's `GlobalWorkerOptions.workerSrc`
+  at the physical `pdf-parse` worker file (`PDFParse.setWorker(...)`, called
+  once at module init). Without this, **every single PDF upload fails**
+  under Next.js/Turbopack with `Setting up fake worker failed: Cannot find
+  module '...pdf.worker.mjs'` — pdfjs-dist resolves its worker script
+  relative to its own bundled module by default, and Turbopack doesn't
+  carry that sibling file into the compiled output. This was very likely
+  the actual cause behind vague "فشلت المعالجة" reports, not corrupt files
+  — verified live (both `next dev` and a production `next build && next
+  start`) that a previously-failing valid PDF parses correctly after this
+  fix, while a genuinely corrupt file still fails with an honest,
+  now-specific reason (`explainParseError` in `lib/document-parser.ts`).
+  If this ever regresses after a `pdf-parse`/`pdfjs-dist` version bump,
+  check that `node_modules/pdf-parse/dist/pdf-parse/esm/pdf.worker.mjs`
+  still exists at that path.
 - The offline matcher is a keyword/period-coverage heuristic
   (`lib/text-normalize.ts` + `lib/offline-matcher.ts`), not a language model —
   it's meant to keep the checklist usable with zero setup, not to replace

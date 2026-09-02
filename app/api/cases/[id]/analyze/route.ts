@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { matchDocumentsToRequirements } from "@/lib/ai-matcher";
 import { getClientApiKeysFromRequest } from "@/lib/ai-client";
-import type { CaseType } from "@/lib/schemas";
+import type { CaseType, DocCategory } from "@/lib/schemas";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -55,6 +55,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         text: d.extractedText ?? "",
         note: d.detectedPeriod,
         parseStatus: d.parseStatus,
+        docCategory: d.docCategory as DocCategory | null,
       })),
       caseRecord.caseType as CaseType,
       clientKeys,

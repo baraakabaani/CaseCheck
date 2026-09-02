@@ -4,7 +4,6 @@ import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   UploadCloud,
   FileText,
@@ -13,11 +12,11 @@ import {
   File as FileIcon,
   Trash2,
   Loader2,
-  Download,
   AlertTriangle,
 } from "lucide-react";
-import { formatDateTime, formatFileSize } from "@/lib/format";
+import { formatFileSize } from "@/lib/format";
 import type { DocumentDetail } from "@/lib/queries";
+import type { DocCategory } from "@/lib/schemas";
 import { cn } from "@/lib/utils";
 
 const ACCEPTED = {
@@ -38,24 +37,27 @@ const KIND_ICON: Record<string, typeof FileText> = {
   other: FileIcon,
 };
 
-const PARSE_STATUS_LABEL: Record<string, { label: string; className: string }> = {
-  PARSED: { label: "تمت المعالجة", className: "text-emerald-600" },
-  PENDING: { label: "قيد المعالجة", className: "text-muted-foreground" },
-  FAILED: { label: "فشلت المعالجة", className: "text-red-600" },
-  UNSUPPORTED: { label: "نوع غير مدعوم", className: "text-amber-600" },
-};
-
-export function FileUploader({
+/** One of the 5 fixed Phase-3 upload slots — matches lib/schemas.ts
+ * DOC_CATEGORIES (minus UNSPECIFIED, which is never chosen at upload time). */
+export function DocumentSlotUploader({
   caseId,
+  docCategory,
+  title,
+  multiple,
   documents,
   onChanged,
 }: {
   caseId: string;
+  docCategory: DocCategory;
+  title: string;
+  multiple: boolean;
   documents: DocumentDetail[];
   onChanged: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const atCapacity = !multiple && documents.length >= 1;
 
   const onDrop = useCallback(
     async (acceptedFiles: File[], rejections: { file: File }[]) => {
@@ -64,9 +66,11 @@ export function FileUploader({
       }
       if (acceptedFiles.length === 0) return;
 
+      const files = multiple ? acceptedFiles : acceptedFiles.slice(0, 1);
       setUploading(true);
       const formData = new FormData();
-      for (const file of acceptedFiles) formData.append("files", file);
+      for (const file of files) formData.append("files", file);
+      formData.append("docCategory", docCategory);
 
       try {
         const res = await fetch(`/api/cases/${caseId}/documents`, {
@@ -80,7 +84,7 @@ export function FileUploader({
           (r) => r.error,
         );
         const succeeded = data.results.length - failed.length;
-        if (succeeded > 0) toast.success(`تم رفع ${succeeded} ملف(ات) بنجاح`);
+        if (succeeded > 0) toast.success(`تم رفع ${succeeded} ملف(ات) بنجاح — ${title}`);
         for (const f of failed) toast.error(`${f.fileName}: ${f.error}`);
 
         onChanged();
@@ -90,21 +94,22 @@ export function FileUploader({
         setUploading(false);
       }
     },
-    [caseId, onChanged],
+    [caseId, docCategory, multiple, title, onChanged],
   );
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
     accept: ACCEPTED,
-    disabled: uploading,
+    disabled: uploading || atCapacity,
+    multiple,
+    noClick: true,
+    noKeyboard: true,
   });
 
   async function handleDelete(docId: string) {
     setDeletingId(docId);
     try {
-      const res = await fetch(`/api/cases/${caseId}/documents/${docId}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(`/api/cases/${caseId}/documents/${docId}`, { method: "DELETE" });
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "فشل حذف الملف");
@@ -119,81 +124,83 @@ export function FileUploader({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-bold">{title}</p>
+
       <div
         {...getRootProps()}
         className={cn(
-          "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-10 text-center transition-colors",
-          isDragActive ? "border-primary bg-primary/5" : "border-muted-foreground/25",
-          uploading && "pointer-events-none opacity-60",
+          "flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-4 text-center transition-colors",
+          isDragActive && "border-primary bg-primary/5",
+          !isDragActive && "border-muted-foreground/25",
+          (uploading || atCapacity) && "opacity-60",
         )}
       >
         <input {...getInputProps()} />
-        {uploading ? (
-          <Loader2 className="size-8 animate-spin text-muted-foreground" />
-        ) : (
-          <UploadCloud className="size-8 text-muted-foreground" />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={open}
+          disabled={uploading || atCapacity}
+        >
+          {uploading ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <UploadCloud className="size-4" />
+          )}
+          {multiple ? "رفع ملفات" : "رفع ملف"}
+        </Button>
+        {atCapacity && (
+          <p className="text-xs text-muted-foreground">
+            احذف الملف الحالي لرفع بديل عنه
+          </p>
         )}
-        <p className="font-medium">اسحب الملفات هنا أو اضغط للاختيار</p>
-        <p className="text-xs text-muted-foreground">
-          PDF، Word، Excel، CSV، صور (PNG/JPG) — بحد أقصى 25 ميجابايت لكل ملف
-        </p>
       </div>
 
       {documents.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           {documents.map((doc) => {
             const Icon = KIND_ICON[doc.fileKind] ?? FileIcon;
-            const status = PARSE_STATUS_LABEL[doc.parseStatus];
+            const failed = doc.parseStatus === "FAILED";
             return (
-              <div key={doc.id} className="flex flex-col gap-1 rounded-md border p-3">
-                <div className="flex items-center gap-3">
-                  <Icon className="size-5 shrink-0 text-muted-foreground" />
+              <div key={doc.id} className="flex flex-col gap-1 rounded-md border p-2">
+                <div className="flex items-center gap-2">
+                  <Icon className="size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{doc.fileName}</div>
-                    <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                    <div className="truncate text-xs font-medium">{doc.fileName}</div>
+                    <div className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
                       <span>{formatFileSize(doc.fileSize)}</span>
-                      <span>·</span>
-                      <span>{formatDateTime(doc.uploadedAt)}</span>
-                      <span>·</span>
-                      <span className={status?.className}>{status?.label}</span>
-                      {doc.detectedPeriod && (
+                      {doc.pageCount != null && (
                         <>
                           <span>·</span>
-                          <span className="flex items-center gap-1 text-amber-600">
-                            <AlertTriangle className="size-3" />
-                            {doc.detectedPeriod}
-                          </span>
+                          <span>{doc.pageCount} صفحة</span>
+                        </>
+                      )}
+                      {failed && (
+                        <>
+                          <span>·</span>
+                          <span className="text-red-600">فشلت المعالجة</span>
                         </>
                       )}
                     </div>
                   </div>
-                  <Badge variant="outline" className="hidden shrink-0 sm:inline-flex">
-                    {doc.fileKind}
-                  </Badge>
-                  <Button variant="ghost" size="icon" asChild>
-                    <a
-                      href={`/api/cases/${caseId}/documents/${doc.id}?download=1`}
-                      download={doc.fileName}
-                    >
-                      <Download className="size-4" />
-                    </a>
-                  </Button>
                   <Button
                     variant="ghost"
                     size="icon"
+                    className="size-6 shrink-0"
                     disabled={deletingId === doc.id}
                     onClick={() => handleDelete(doc.id)}
                   >
                     {deletingId === doc.id ? (
-                      <Loader2 className="size-4 animate-spin" />
+                      <Loader2 className="size-3.5 animate-spin" />
                     ) : (
-                      <Trash2 className="size-4 text-destructive" />
+                      <Trash2 className="size-3.5 text-destructive" />
                     )}
                   </Button>
                 </div>
-                {doc.parseStatus === "FAILED" && doc.parseError && (
-                  <p className="flex items-start gap-1 ps-8 text-xs text-red-600">
+                {failed && doc.parseError && (
+                  <p className="flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-500">
                     <AlertTriangle className="mt-0.5 size-3 shrink-0" />
                     <span>{doc.parseError}</span>
                   </p>

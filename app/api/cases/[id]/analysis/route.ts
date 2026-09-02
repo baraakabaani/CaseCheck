@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { analyzeCaseFile } from "@/lib/case-analyzer";
 import { getClientApiKeysFromRequest } from "@/lib/ai-client";
-import type { MandateNatureOption, LitigationDegree, CaseCategory } from "@/lib/schemas";
+import type { DocCategory, MandateNatureOption, LitigationDegree, CaseCategory } from "@/lib/schemas";
 import { LITIGATION_DEGREE_LABELS, CASE_CATEGORY_LABELS } from "@/lib/case-intake-labels";
 
 interface RouteParams {
@@ -60,6 +60,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         fileKind: d.fileKind,
         text: d.extractedText ?? "",
         detectedDates: safeParseJson<string[]>(d.detectedDates, []),
+        docCategory: (d.docCategory as DocCategory | null) ?? "UNSPECIFIED",
       })),
       clientKeys,
     );
@@ -91,14 +92,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       },
     }),
     prisma.case.update({ where: { id: caseId }, data: { intakeStatus: "DRAFT_PHASE_4" } }),
-    // تصنيف كل مستند وتحديد الطرف الذي قدّمه — دون الحاجة لتصنيف يدوي عند الرفع.
+    // تحديد الطرف الذي قدّم كل مستند — التصنيف (docCategory) لم يعد يُعاد
+    // اشتقاقه هنا: هو معروف مسبقاً منذ الرفع (أحد الخانات الخمس بالمرحلة 3).
     ...outcome.result.receivedDocuments
       .filter((rd) => validDocumentIds.has(rd.documentId))
       .map((rd) =>
         prisma.document.update({
           where: { id: rd.documentId },
           data: {
-            docCategory: rd.docCategory,
             submittedByPartyId:
               rd.submittedByPartyId && validPartyIds.has(rd.submittedByPartyId)
                 ? rd.submittedByPartyId

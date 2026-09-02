@@ -2,6 +2,7 @@ import { z } from "zod";
 import { aiMatchResponseSchema, type AiMatchResponse, type CaseType } from "./schemas";
 import { createAiClient, resolveAiKey, type ClientApiKeys, type ResolvedAiKey } from "./ai-client";
 import { offlineMatchDocumentsToRequirements } from "./offline-matcher";
+import { buildSingleDocumentDigest } from "./smart-ingest";
 import type { MatchDocumentInput, MatchRequirementInput } from "./matching-types";
 
 export type { MatchDocumentInput, MatchRequirementInput };
@@ -16,16 +17,15 @@ export interface MatchOutcome {
   warning?: string;
 }
 
-// This budget is sized for Groq's free "on_demand" tier, which caps
-// requests at 8,000 tokens/minute (prompt_tokens + max_tokens, reserved up
-// front) — it's a *total* character budget shared across all documents
-// (see buildDocumentsBlock), not a flat per-document cap, so a case with
-// many/long documents still gets a real (if partial) AI pass instead of
-// blowing the limit outright. Gemini's much larger free-tier budget and
-// ~1M token context don't need this, but the same cap is kept for it too
-// (harmless, keeps prompt sizes/latency reasonable either way).
+// Each document is first passed through lib/smart-ingest.ts's category-aware
+// digest (the same "نظام الضغط الذكي" used by lib/case-analyzer.ts) instead
+// of a raw truncated excerpt — much smaller and information-dense, so this
+// total budget (sized for Groq's free "on_demand" tier: 8,000 tokens/minute,
+// prompt_tokens + max_tokens reserved up front) is now a safety net rather
+// than the primary constraint; a case with many/long documents still gets a
+// real (if partial) AI pass instead of blowing the limit outright.
 const TOTAL_DOCUMENT_CHARS_BUDGET = 9000; // ≈ 3,000 tokens at ~3 chars/token for Arabic-heavy text
-const MAX_DOC_CHARS_IN_PROMPT = 6000; // ceiling for any single document within that shared budget
+const PER_DOC_DIGEST_BUDGET_TOKENS = 300; // ceiling for any single document's digest
 
 const SYSTEM_PROMPT = `أنت خبير قانوني ومحاسبي متخصص في تدقيق ملفات الدعاوى القضائية والخبرة المحاسبية في محاكم دولة الإمارات العربية المتحدة.
 
@@ -77,9 +77,12 @@ function buildDocumentsBlock(documents: MatchDocumentInput[]): {
       skippedCount++;
       continue;
     }
-    const cap = Math.min(fullText.length, remaining, MAX_DOC_CHARS_IN_PROMPT);
-    const excerpt = fullText.slice(0, cap);
-    if (excerpt.length < fullText.length) truncatedCount++;
+    const tokenBudget = Math.min(PER_DOC_DIGEST_BUDGET_TOKENS, Math.floor(remaining / 3));
+    const { text: excerpt, truncated } = buildSingleDocumentDigest(
+      { id: d.id, fileName: d.fileName, fileKind: d.fileKind, docCategory: d.docCategory ?? "UNSPECIFIED", text: fullText },
+      tokenBudget,
+    );
+    if (truncated) truncatedCount++;
     remaining -= excerpt.length;
 
     parts.push(
@@ -90,7 +93,7 @@ function buildDocumentsBlock(documents: MatchDocumentInput[]): {
         `نوع الملف: ${d.fileKind}`,
         `تواريخ مكتشفة في النص: ${d.detectedDates.join("، ") || "لا يوجد"}`,
         d.note ? `ملاحظة: ${d.note}` : null,
-        `مقتطف من المحتوى${excerpt.length < fullText.length ? " (مُختصر لضيق المساحة)" : ""}:\n"""\n${excerpt}\n"""`,
+        `ملخص محلي من المحتوى${truncated ? " (مُختصر لضيق المساحة)" : ""}:\n"""\n${excerpt}\n"""`,
       ]
         .filter(Boolean)
         .join("\n"),

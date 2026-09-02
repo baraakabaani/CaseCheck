@@ -60,7 +60,7 @@ export function offlineAnalyzeCaseFile(
 
   const receivedDocuments = documents.map((d) => ({
     documentId: d.id,
-    docCategory: "UNSPECIFIED" as const,
+    docCategory: d.docCategory,
     submittedByPartyId: null,
     periodLabel: d.detectedDates.slice(0, 3).join("، ") || null,
     status: "مستلم",

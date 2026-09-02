@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { saveUploadedFile } from "@/lib/file-storage";
 import { extractDocument } from "@/lib/document-parser";
+import { DOC_CATEGORIES, type DocCategory } from "@/lib/schemas";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -33,6 +34,15 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: "لم يتم إرفاق أي ملفات" }, { status: 400 });
   }
 
+  // خانة الرفع (المرحلة 3) التي أتت منها هذه الدفعة — واحدة من الخانات
+  // الخمس، محددة عند الرفع بدل تصنيفها لاحقاً بالذكاء الاصطناعي. طلبات
+  // قديمة بدون هذا الحقل تبقى UNSPECIFIED كما كانت.
+  const rawDocCategory = formData.get("docCategory");
+  const docCategory: DocCategory =
+    typeof rawDocCategory === "string" && (DOC_CATEGORIES as readonly string[]).includes(rawDocCategory)
+      ? (rawDocCategory as DocCategory)
+      : "UNSPECIFIED";
+
   const results = [];
   for (const file of files) {
     if (file.size > MAX_FILE_SIZE) {
@@ -59,9 +69,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
           detectedDates: JSON.stringify(extracted.detectedDates),
           detectedPeriod: extracted.note ?? null,
           pageCount: extracted.pageCount ?? null,
+          docCategory,
         },
       });
-      results.push({ fileName: file.name, document });
+      results.push({ fileName: file.name, document, parseError: extracted.error ?? null });
     } catch (err) {
       results.push({
         fileName: file.name,

@@ -1,6 +1,8 @@
-// Shared input shapes for both the Groq-backed matcher (lib/ai-matcher.ts)
+// Shared input shapes for both the AI-backed matcher (lib/ai-matcher.ts)
 // and the zero-API heuristic fallback (lib/offline-matcher.ts), so the two
 // engines stay interchangeable behind the same call site.
+
+import type { DocCategory } from "./schemas";
 
 export interface MatchDocumentInput {
   id: string;
@@ -13,6 +15,9 @@ export interface MatchDocumentInput {
   note?: string | null;
   /** PENDING | PARSED | FAILED | UNSUPPORTED */
   parseStatus: string;
+  /** Set at upload time (one of the 5 Phase-3 slots) — drives which
+   * lib/smart-ingest.ts digest strategy the AI matcher uses. */
+  docCategory?: DocCategory | null;
 }
 
 export interface MatchRequirementInput {

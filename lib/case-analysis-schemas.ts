@@ -33,3 +33,19 @@ export const caseAnalysisResultSchema = z.object({
   expertNotes: z.array(z.string()),
 });
 export type CaseAnalysisResult = z.infer<typeof caseAnalysisResultSchema>;
+
+// ---------------------------------------------------------------------------
+// AI-facing subset — what we actually ask the model to return. docCategory
+// is deliberately excluded from receivedDocuments: it's already known (set
+// at upload time, one of the 5 Phase-3 slots — see lib/smart-ingest.ts), so
+// asking the model to re-derive and re-emit it would just waste output
+// tokens. lib/case-analyzer.ts fills it back in from the ground truth
+// before returning/storing the full CaseAnalysisResult above.
+// ---------------------------------------------------------------------------
+export const aiReceivedDocumentSchema = receivedDocumentSummarySchema.omit({ docCategory: true });
+export type AiReceivedDocument = z.infer<typeof aiReceivedDocumentSchema>;
+
+export const aiCaseAnalysisResultSchema = caseAnalysisResultSchema
+  .omit({ receivedDocuments: true })
+  .extend({ receivedDocuments: z.array(aiReceivedDocumentSchema) });
+export type AiCaseAnalysisResult = z.infer<typeof aiCaseAnalysisResultSchema>;

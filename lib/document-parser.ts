@@ -71,6 +71,30 @@ function extractCsv(buffer: Buffer): string {
 
 const MAX_EXTRACTED_CHARS = 60_000;
 
+/** Turns a raw library error (pdf-parse / mammoth / ExcelJS internals,
+ * usually in English and not actionable on its own) into a specific Arabic
+ * message when a known failure pattern is recognized, so a FAILED status in
+ * the UI actually tells the expert what to do next instead of just "فشلت
+ * المعالجة" with no detail. Falls back to the raw message otherwise. */
+function explainParseError(err: unknown, fileKind: FileKind): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const lower = raw.toLowerCase();
+
+  if (/password|encrypted|permission/.test(lower)) {
+    return "الملف محمي بكلمة مرور أو مشفّر — يرجى إزالة الحماية ثم إعادة الرفع.";
+  }
+  if (fileKind === "xlsx" && /central directory|zip|invalid signature|not.*valid/.test(lower)) {
+    return "تعذرت قراءة ملف Excel — قد يكون بصيغة قديمة (.xls) أو تالفاً. يرجى فتحه وحفظه بصيغة .xlsx الحديثة ثم إعادة الرفع.";
+  }
+  if (fileKind === "docx" && /central directory|zip|invalid signature|not.*valid/.test(lower)) {
+    return "تعذرت قراءة ملف Word — قد يكون بصيغة قديمة (.doc) أو تالفاً. يرجى فتحه وحفظه بصيغة .docx الحديثة ثم إعادة الرفع.";
+  }
+  if (fileKind === "pdf") {
+    return `تعذر استخراج النص من ملف PDF (${raw}) — قد يكون تالفاً أو بصيغة غير قياسية. يمكن رفعه كمرجع، لكن راجعه يدوياً.`;
+  }
+  return raw || "فشل استخراج النص من الملف";
+}
+
 export async function extractDocument(
   buffer: Buffer,
   fileName: string,
@@ -140,7 +164,10 @@ export async function extractDocument(
           text: "",
           detectedDates: [],
           status: "UNSUPPORTED",
-          error: "نوع الملف غير مدعوم للاستخراج التلقائي للنص",
+          error:
+            fileKind === "other" && /\.(doc|xls)$/i.test(fileName)
+              ? "صيغة Word/Excel القديمة (.doc/.xls) غير مدعومة — يرجى الحفظ بصيغة .docx/.xlsx الحديثة ثم إعادة الرفع."
+              : "نوع الملف غير مدعوم للاستخراج التلقائي للنص",
         };
     }
   } catch (err) {
@@ -149,7 +176,7 @@ export async function extractDocument(
       text: "",
       detectedDates: [],
       status: "FAILED",
-      error: err instanceof Error ? err.message : "فشل استخراج النص من الملف",
+      error: explainParseError(err, fileKind),
     };
   }
 }

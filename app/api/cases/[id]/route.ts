@@ -45,11 +45,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     );
   }
 
-  // claimants/respondents are only set at creation (Phase 1, POST /api/cases)
-  // — editing the party list is not yet supported via this general PATCH.
   const {
-    claimants: _claimants,
-    respondents: _respondents,
+    claimants,
+    respondents,
     clientEmail,
     title,
     committeeMembers,
@@ -61,8 +59,6 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     reportDeadlineDate,
     ...rest
   } = parsed.data;
-  void _claimants;
-  void _respondents;
 
   const data: Prisma.CaseUpdateInput = { ...rest };
   if (title) data.title = title;
@@ -84,7 +80,26 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const updated = await prisma.case.update({ where: { id }, data });
+    const updated = await prisma.$transaction(async (tx) => {
+      // The party list is replaced wholesale only when the caller actually
+      // sends claimants/respondents (the Phase-1 edit form always sends
+      // both; Phase 2's mandate save never includes these fields, so it's
+      // unaffected). Deleting a CaseParty is safe — Document.submittedByPartyId
+      // is onDelete: SetNull, not a hard dependency.
+      if (claimants !== undefined) {
+        await tx.caseParty.deleteMany({ where: { caseId: id, role: "CLAIMANT" } });
+        await tx.caseParty.createMany({
+          data: claimants.map((name, order) => ({ caseId: id, role: "CLAIMANT", name, order })),
+        });
+      }
+      if (respondents !== undefined) {
+        await tx.caseParty.deleteMany({ where: { caseId: id, role: "RESPONDENT" } });
+        await tx.caseParty.createMany({
+          data: respondents.map((name, order) => ({ caseId: id, role: "RESPONDENT", name, order })),
+        });
+      }
+      return tx.case.update({ where: { id }, data, include: { parties: { orderBy: { order: "asc" } } } });
+    });
     return NextResponse.json({ case: updated });
   } catch {
     return NextResponse.json({ error: "الدعوى غير موجودة" }, { status: 404 });

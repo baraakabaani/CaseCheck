@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sparkles, Loader2, Zap } from "lucide-react";
+import { Sparkles, Loader2, Zap, ArrowRight } from "lucide-react";
 import { DocumentSlotUploader } from "@/components/DocumentSlotUploader";
 import { buildClientApiKeyHeaders } from "@/lib/client-api-key";
 import type { DocumentDetail } from "@/lib/queries";
@@ -88,20 +89,29 @@ export function CaseDocumentsStep({
         </CardContent>
       </Card>
 
-      <div className="flex flex-col items-end gap-2">
-        <Button onClick={handleAnalyze} disabled={analyzing || documents.length === 0} size="lg">
-          {analyzing ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Sparkles className="size-4" />
-          )}
-          بدء التحليل الأولي بالذكاء الاصطناعي
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <Button variant="ghost" asChild>
+          <Link href={`/cases/${caseId}/setup/mandate`}>
+            <ArrowRight className="size-4" />
+            رجوع لتعديل بيانات المأمورية
+          </Link>
         </Button>
-        <p className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Zap className="size-3.5 text-amber-500" />
-          نظام الضغط الذكي مفعّل: يتم تلخيص الحسابات والمستندات محلياً قبل الإرسال لتوفير
-          الاستهلاك.
-        </p>
+
+        <div className="flex flex-col items-end gap-2">
+          <Button onClick={handleAnalyze} disabled={analyzing || documents.length === 0} size="lg">
+            {analyzing ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Sparkles className="size-4" />
+            )}
+            بدء التحليل الأولي بالذكاء الاصطناعي
+          </Button>
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Zap className="size-3.5 text-amber-500" />
+            نظام الضغط الذكي مفعّل: يتم تلخيص الحسابات والمستندات محلياً قبل الإرسال لتوفير
+            الاستهلاك.
+          </p>
+        </div>
       </div>
     </div>
   );

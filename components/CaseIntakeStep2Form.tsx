@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2, ArrowRight } from "lucide-react";
 import {
   APPOINTMENT_CAPACITIES,
   MANDATE_NATURE_OPTIONS,
@@ -38,21 +39,60 @@ interface Step2Draft {
   mandateNotes: string;
 }
 
-export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
+export interface CaseIntakeStep2InitialData {
+  mandateDecisionDate: string;
+  mandateReceivedDate: string;
+  mandateAcceptedDate: string;
+  nextHearingDate: string;
+  reportDeadlineDate: string;
+  appointmentCapacity: AppointmentCapacity;
+  committeeMembers: { name: string; specialization: string | null }[];
+  mandateNature: MandateNatureOption[];
+  mandateNotes: string | null;
+}
+
+export function CaseIntakeStep2Form({
+  caseId,
+  initialData,
+}: {
+  caseId: string;
+  /** Set when this phase was already saved once — e.g. reached via a
+   * "رجوع" link from Phase 3 — so the form reflects the real saved values
+   * instead of starting blank. Skips the localStorage draft mechanism. */
+  initialData?: CaseIntakeStep2InitialData;
+}) {
   const router = useRouter();
+  const isEditing = Boolean(initialData);
   const [submitting, setSubmitting] = useState(false);
   const draftKey = `case-intake-step2-draft-${caseId}`;
 
-  const [mandateDecisionDate, setMandateDecisionDate] = useState("");
-  const [mandateReceivedDate, setMandateReceivedDate] = useState("");
-  const [mandateAcceptedDate, setMandateAcceptedDate] = useState("");
-  const [nextHearingDate, setNextHearingDate] = useState("");
-  const [reportDeadlineDate, setReportDeadlineDate] = useState("");
-  const [appointmentCapacity, setAppointmentCapacity] =
-    useState<AppointmentCapacity>("SOLE_EXPERT");
-  const [committeeMembers, setCommitteeMembers] = useState<CommitteeMemberDraft[]>([]);
-  const [mandateNature, setMandateNature] = useState<Set<MandateNatureOption>>(new Set());
-  const [mandateNotes, setMandateNotes] = useState("");
+  const [mandateDecisionDate, setMandateDecisionDate] = useState(
+    initialData?.mandateDecisionDate ?? "",
+  );
+  const [mandateReceivedDate, setMandateReceivedDate] = useState(
+    initialData?.mandateReceivedDate ?? "",
+  );
+  const [mandateAcceptedDate, setMandateAcceptedDate] = useState(
+    initialData?.mandateAcceptedDate ?? "",
+  );
+  const [nextHearingDate, setNextHearingDate] = useState(initialData?.nextHearingDate ?? "");
+  const [reportDeadlineDate, setReportDeadlineDate] = useState(
+    initialData?.reportDeadlineDate ?? "",
+  );
+  const [appointmentCapacity, setAppointmentCapacity] = useState<AppointmentCapacity>(
+    initialData?.appointmentCapacity ?? "SOLE_EXPERT",
+  );
+  const [committeeMembers, setCommitteeMembers] = useState<CommitteeMemberDraft[]>(
+    initialData?.committeeMembers.map((m) => ({
+      key: crypto.randomUUID(),
+      name: m.name,
+      specialization: m.specialization ?? "",
+    })) ?? [],
+  );
+  const [mandateNature, setMandateNature] = useState<Set<MandateNatureOption>>(
+    new Set(initialData?.mandateNature ?? []),
+  );
+  const [mandateNotes, setMandateNotes] = useState(initialData?.mandateNotes ?? "");
 
   const isCommittee = appointmentCapacity !== "SOLE_EXPERT";
 
@@ -67,7 +107,7 @@ export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
 
   const restored = useRef(false);
   useEffect(() => {
-    if (restored.current) return;
+    if (restored.current || isEditing) return;
     restored.current = true;
     const draft = loadFormDraft<Step2Draft>(draftKey);
     if (!draft) return;
@@ -86,10 +126,10 @@ export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
     if (draft.mandateNature?.length) setMandateNature(new Set(draft.mandateNature));
     if (draft.mandateNotes) setMandateNotes(draft.mandateNotes);
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [draftKey]);
+  }, [draftKey, isEditing]);
 
   useEffect(() => {
-    if (!restored.current) return;
+    if (!restored.current || isEditing) return;
     saveFormDraft<Step2Draft>(draftKey, {
       mandateDecisionDate,
       mandateReceivedDate,
@@ -106,6 +146,7 @@ export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
     });
   }, [
     draftKey,
+    isEditing,
     mandateDecisionDate,
     mandateReceivedDate,
     mandateAcceptedDate,
@@ -149,7 +190,9 @@ export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
             : [],
           mandateNature: Array.from(mandateNature),
           mandateNotes: mandateNotes.trim() || null,
-          intakeStatus: "DRAFT_PHASE_3",
+          // لا يُرسل عند التعديل (isEditing) — تفادياً لإرجاع دعوى وصلت
+          // بالفعل لمرحلة لاحقة (رفع مستندات/تحليل/مكتملة) إلى هذه المرحلة.
+          ...(isEditing ? {} : { intakeStatus: "DRAFT_PHASE_3" }),
         }),
       });
       const data = await res.json();
@@ -332,7 +375,14 @@ export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Button variant="ghost" asChild>
+          <Link href={`/cases/new?resume=${caseId}`}>
+            <ArrowRight className="size-4" />
+            رجوع لتعديل بيانات القضية
+          </Link>
+        </Button>
+
         <Button type="submit" disabled={submitting} size="lg">
           {submitting && <Loader2 className="size-4 animate-spin" />}
           التالي: رفع المستندات

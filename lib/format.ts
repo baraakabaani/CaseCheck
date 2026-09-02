@@ -8,6 +8,15 @@ export function formatDate(date: Date | string | null | undefined): string {
   }).format(d);
 }
 
+/** `YYYY-MM-DD`, the value shape `<input type="date">` expects — used to
+ * prefill intake-wizard forms from a saved Case record when editing. */
+export function toDateInputValue(date: Date | string | null | undefined): string {
+  if (!date) return "";
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
 export function formatDateTime(date: Date | string | null | undefined): string {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date) : date;

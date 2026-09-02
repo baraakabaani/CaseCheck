@@ -129,7 +129,12 @@ ${buildDocumentsBlock(documents)}
   const completion = await client.chat.completions.create({
     model: GROQ_MODEL,
     temperature: 0.3,
-    max_tokens: 8000,
+    // Kept well below Groq's free-tier 8,000 TPM cap — Groq's rate limiter
+    // reserves (prompt tokens + max_tokens) upfront, so an over-generous
+    // ceiling here can trip the limit even when actual usage is far lower.
+    // Large real case files (many/long documents) can still exceed the
+    // free tier regardless of this — see the README note on Groq tiers.
+    max_tokens: 4000,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT.replace("{{JSON_SCHEMA}}", jsonSchema) },

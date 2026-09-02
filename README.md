@@ -15,8 +15,8 @@ use the app.
 - **Next.js 16** (App Router, TypeScript, Turbopack) — UI and API routes in one deployable app
 - **Tailwind CSS v4 + shadcn/ui**, RTL-first (`dir="rtl"`, `lang="ar"`)
 - **Prisma + SQLite** for persistence (swap the datasource for Postgres in production)
-- **Groq (`groq-sdk`, `llama-3.3-70b-versatile`)** — structured-output matching engine and Arabic email generation, with a zero-API rule-based fallback for both
-- Document parsing: `pdf-parse` (PDF), `mammoth` (DOCX), `exceljs`/`papaparse` (XLSX/CSV). Images are stored and matched by filename only — `llama-3.3-70b-versatile` is text-only, so there's no automatic OCR.
+- **Groq (`groq-sdk`, `openai/gpt-oss-120b`)** — structured-output matching engine and Arabic email generation, with a zero-API rule-based fallback for both
+- Document parsing: `pdf-parse` (PDF), `mammoth` (DOCX), `exceljs`/`papaparse` (XLSX/CSV). Images are stored and matched by filename only — the configured Groq model is text-only, so there's no automatic OCR.
 
 ## Getting started
 
@@ -35,7 +35,7 @@ Open [http://localhost:3000](http://localhost:3000).
 |---|---|
 | `DATABASE_URL` | SQLite file path by default (`file:./dev.db`) |
 | `GROQ_API_KEY` | Optional. Server-side fallback key for AI matching/email drafting. |
-| `GROQ_MODEL` | Optional override, defaults to `llama-3.3-70b-versatile` |
+| `GROQ_MODEL` | Optional override, defaults to `openai/gpt-oss-120b` |
 | `UPLOADS_DIR` | Local folder for uploaded case files (default `uploads`) |
 
 ### Three ways to run the matching engine
@@ -150,3 +150,10 @@ otherwise it's wiped on every restart/redeploy:
 - File storage is local disk by default; for a multi-instance deployment,
   swap `lib/file-storage.ts` for object storage (S3-compatible) and
   `DATABASE_URL` for Postgres.
+- Groq's free `on_demand` tier caps requests at **8,000 tokens/minute**,
+  counted as `prompt_tokens + max_tokens` up front. `max_tokens` on every
+  Groq call in this app is kept modest (4,000 for matching/analysis, 2,048
+  for the email draft) to leave room for the prompt, but a case with many
+  or long documents can still exceed the free tier — the request then
+  fails over to the offline mode automatically (no crash), surfaced as a
+  warning toast. If that happens often, upgrade the Groq account's tier.

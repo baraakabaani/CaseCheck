@@ -121,7 +121,7 @@ export async function extractDocument(
         };
       }
       case "image": {
-        // No text/vision model is wired up (llama-3.3-70b-versatile is
+        // No vision model is wired up (the configured Groq model is
         // text-only), so images can't be OCR'd automatically. The filename
         // is kept as a weak signal for the offline heuristic matcher, and
         // the note flags the document for manual review either way.

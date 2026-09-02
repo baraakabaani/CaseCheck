@@ -1,7 +1,7 @@
 import Groq from "groq-sdk";
 import { GROQ_API_KEY_HEADER } from "./api-key-header";
 
-export const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+export const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 /** A client-provided key (typed into the UI, kept in the browser's
  * localStorage) always wins over the server's own key — it lets a user run

@@ -10,24 +10,46 @@
     "emptyTitle": "لا توجد ملفات دعاوى بعد",
     "emptySubtitle": "ابدأ بإنشاء ملف دعوى جديد وتحديد قائمة المستندات المطلوبة"
   },
-  "caseForm": {
-    "title": "إنشاء ملف دعوى جديد",
-    "subtitle": "أدخل بيانات الدعوى وحدد قائمة المستندات المطلوبة لبدء عملية التدقيق",
+  "caseIntake": {
+    "step1Title": "بيانات القضية الأساسية",
+    "step2Title": "بيانات مأمورية الخبرة",
+    "step3Title": "رفع ملف الدعوى والمستندات القضائية",
+    "step4Title": "التحليل الأولي لملف الدعوى",
     "caseNumber": "رقم الدعوى",
-    "caseTitle": "عنوان / موضوع الدعوى",
-    "caseType": "نوع الملف",
-    "caseTypeLitigation": "دعوى قضائية",
-    "caseTypeAccountingExpert": "خبرة محاسبية",
     "court": "المحكمة / الجهة القضائية",
-    "claimantName": "اسم المدعي",
-    "respondentName": "اسم المدعى عليه",
+    "circuit": "الدائرة",
+    "litigationDegree": "درجة التقاضي",
+    "caseCategory": "نوع الدعوى",
+    "title": "عنوان مختصر للقضية",
+    "claimants": "اسم المدعي / المستأنف",
+    "respondents": "اسم المدعى عليه / المستأنف ضده",
+    "notes": "ملاحظات أولية",
     "clientName": "اسم المتعامل (جهة المراسلة)",
     "clientEmail": "البريد الإلكتروني للمتعامل",
-    "notes": "ملاحظات",
-    "requirementsTitle": "متطلبات ملف الدعوى",
-    "requirementsHint": "حدد المستندات المطلوبة من القائمة المقترحة، ويمكنك إضافة متطلبات مخصصة إضافية",
-    "addRequirement": "إضافة متطلب",
-    "submit": "إنشاء ملف الدعوى"
+    "mandateDecisionDate": "تاريخ قرار / حكم ندب الخبرة",
+    "appointmentCapacity": "صفة الندب",
+    "mandateNature": "طبيعة المأمورية الحسابية",
+    "mandateNotes": "ملاحظات على المأمورية",
+    "runAiAnalysis": "تحليل ملف الدعوى بالذكاء الاصطناعي",
+    "approveAnalysis": "مراجعة واعتماد التحليل الأولي"
+  },
+  "litigationDegree": {
+    "FIRST_INSTANCE": "أول درجة",
+    "APPEAL": "استئناف",
+    "EXECUTION": "تنفيذ",
+    "OTHER": "أخرى"
+  },
+  "caseCategory": {
+    "COMMERCIAL": "تجاري",
+    "CIVIL": "مدني",
+    "REAL_ESTATE": "عقاري",
+    "LABOR": "عمالي",
+    "OTHER": "أخرى"
+  },
+  "appointmentCapacity": {
+    "SOLE_EXPERT": "خبير حسابي منفرد",
+    "COMMITTEE_CHAIR": "رئيس لجنة خبراء",
+    "COMMITTEE_MEMBER": "عضو في لجنة خبراء"
   },
   "status": {
     "PROVIDED": "مقدم",

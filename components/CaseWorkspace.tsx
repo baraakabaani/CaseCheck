@@ -13,6 +13,7 @@ import { MetricCards } from "@/components/MetricCards";
 import { FileUploader } from "@/components/FileUploader";
 import { ChecklistTable } from "@/components/ChecklistTable";
 import { EmailPreviewModal } from "@/components/EmailPreviewModal";
+import { CaseAnalysisReview } from "@/components/CaseAnalysisReview";
 import { formatDate } from "@/lib/format";
 import type { CaseDetail } from "@/lib/queries";
 
@@ -38,6 +39,10 @@ export function CaseWorkspace({ caseDetail }: { caseDetail: CaseDetail }) {
   const pendingRequirements = caseDetail.requirements.filter(
     (r) => r.status === "MISSING" || r.status === "PARTIALLY_PROVIDED",
   );
+
+  const claimants = caseDetail.parties.filter((p) => p.role === "CLAIMANT");
+  const respondents = caseDetail.parties.filter((p) => p.role === "RESPONDENT");
+  const latestAnalysis = caseDetail.analyses[0] ?? null;
 
   function refresh() {
     router.refresh();
@@ -86,6 +91,17 @@ export function CaseWorkspace({ caseDetail }: { caseDetail: CaseDetail }) {
               {caseDetail.court ? ` · ${caseDetail.court}` : ""}
               {caseDetail.clientName ? ` · المتعامل: ${caseDetail.clientName}` : ""}
             </p>
+            {(claimants.length > 0 || respondents.length > 0) && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {claimants.length > 0 && (
+                  <>المدعي: {claimants.map((p) => p.name).join("، ")}</>
+                )}
+                {claimants.length > 0 && respondents.length > 0 && " · "}
+                {respondents.length > 0 && (
+                  <>المدعى عليه: {respondents.map((p) => p.name).join("، ")}</>
+                )}
+              </p>
+            )}
           </div>
           <Button variant="outline" onClick={handleDeleteCase} disabled={deleting}>
             {deleting ? (
@@ -110,6 +126,7 @@ export function CaseWorkspace({ caseDetail }: { caseDetail: CaseDetail }) {
           <TabsTrigger value="notices">
             إخطارات اجتماع الخبرة ({caseDetail.notices.length})
           </TabsTrigger>
+          {latestAnalysis && <TabsTrigger value="analysis">التحليل الأولي</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="checklist">
@@ -214,6 +231,17 @@ export function CaseWorkspace({ caseDetail }: { caseDetail: CaseDetail }) {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {latestAnalysis && (
+          <TabsContent value="analysis">
+            <CaseAnalysisReview
+              caseId={caseDetail.id}
+              analysis={latestAnalysis}
+              documents={caseDetail.documents}
+              parties={caseDetail.parties}
+            />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

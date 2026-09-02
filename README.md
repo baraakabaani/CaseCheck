@@ -53,39 +53,73 @@ The app resolves an API key in this order, per request:
    (`lib/email-templates.ts`). Every AI-backed response reports which mode
    ran (`mode: "AI" | "OFFLINE"`), surfaced to the user as a toast.
 
-## How it works
+## How it works — the 4-phase intake wizard (نموذج الخبرة القضائية)
 
-1. **Create a case** (`/cases/new`) — case metadata plus a requirement
-   checklist, pre-populated from UAE litigation / accounting-expert presets
-   (`lib/presets.ts`, including bilingual `keywords` used by the offline
-   matcher) and freely editable.
-2. **Upload documents** — dropped files are parsed server-side
-   (`lib/document-parser.ts`) into plain text plus detected dates/page count.
-3. **Run smart matching** — `lib/ai-matcher.ts` resolves an API key (see
-   above) and either calls Groq with a strict JSON schema (`lib/schemas.ts`)
-   or runs `lib/offline-matcher.ts`, returning a status, confidence,
-   reasoning, and matched-document references for each requirement either way.
-4. **Review & override** — the checklist table shows the resulting
-   status/reasoning; any item can be manually overridden, which pins it out
-   of future matching runs until reset.
-5. **Generate the client letter** — `lib/email-templates.ts` drafts a formal
-   Arabic letter itemizing what's missing/incomplete (AI or template-based),
-   with copy/Word/print export.
+Every case is opened through a sequential wizard (`app/cases/new` →
+`app/cases/[id]/setup/*`), each phase gated behind the previous one via
+`Case.intakeStatus`:
+
+1. **بيانات القضية الأساسية** (`/cases/new`) — case number, court, circuit,
+   litigation degree, case category, and multiple claimant/respondent
+   parties (`CaseParty`, replacing single claimant/respondent strings).
+2. **بيانات مأمورية الخبرة** (`/cases/[id]/setup/mandate`) — appointment
+   decision/received/accepted dates, next hearing, report deadline,
+   appointment capacity (sole expert / committee, with committee members),
+   and the nature of the accounting mandate (multi-select).
+3. **رفع ملف الدعوى والمستندات القضائية** (`/cases/[id]/setup/documents`) —
+   one unified dropzone (reuses `FileUploader.tsx` as-is) for every judicial
+   document — no manual per-file categorization; the AI classifies them in
+   the next phase.
+4. **التحليل الأولي لملف الدعوى** (`/cases/[id]/setup/analysis`) —
+   `lib/case-analyzer.ts` reads every uploaded document and produces a case
+   summary, the expert mandate broken into tasks, a received-documents
+   table (each document auto-classified and matched to the party that
+   submitted it), a missing-documents list, unclear/contradictory points,
+   and suggested questions per party — reviewed on one screen
+   (`CaseAnalysisReview.tsx`) and approved.
+
+**Approving Phase 4 materializes its missing-documents list into ordinary
+`Requirement` rows** — the pre-existing checklist (`ChecklistTable.tsx`),
+its AI/offline matching (`lib/ai-matcher.ts` / `lib/offline-matcher.ts`),
+and the Notice form's pre-fill (`NoticeForm.tsx`) all keep working
+unchanged on top of it. From there, the existing case workspace
+(`/cases/[id]`) takes over: run smart matching against the checklist,
+draft the client letter, and generate the اخطار (expert-meeting notice) —
+which is effectively this wizard's implied Phase 5 ("prepare and send the
+document request and invite parties to the first meeting").
+
+Like the checklist matcher, Phase 4 uses Groq when a key is available and
+falls back to `lib/offline-case-analyzer.ts` otherwise — but this task is
+generative (summarizing, drafting questions), not just keyword-matchable,
+so the offline version is honestly limited: it still produces a real
+missing-documents list (via the same keyword-coverage technique reused
+from the checklist presets) but leaves the summary/mandate/questions as
+prompts for the expert to fill in manually, and says so in the UI.
 
 ## Project layout
 
 ```
 app/                    RTL App Router pages + API routes
-  cases/new             Case + checklist creation
-  cases/[id]            Case workspace (checklist, documents, email)
-  api/cases/...          REST endpoints backing the above
-components/             FileUploader, ChecklistTable, EmailPreviewModal,
-                        MetricCards, ApiKeySettingsDialog, ...
-lib/                    ai-matcher.ts, offline-matcher.ts, groq-client.ts,
+  cases/new             Phase 1 — case intake wizard entry point
+  cases/[id]/setup/      Phases 2–4 — mandate, documents, analysis review
+  cases/[id]            Case workspace (checklist, documents, email, notices)
+  cases/[id]/notices/    Expert-meeting notice (إخطار) creation + view
+  api/cases/...          REST endpoints backing all of the above
+components/             CaseIntakeStep1Form, CaseIntakeStep2Form,
+                        CaseDocumentsStep, CaseAnalysisReview, WizardSteps,
+                        FileUploader, ChecklistTable, EmailPreviewModal,
+                        NoticeForm, NoticeDocument, MetricCards,
+                        ApiKeySettingsDialog, ...
+lib/                    case-analyzer.ts, offline-case-analyzer.ts,
+                         case-analysis-schemas.ts, case-analysis-types.ts,
+                         case-intake-labels.ts, ai-matcher.ts,
+                         offline-matcher.ts, groq-client.ts,
                          document-parser.ts, pdf-parser.ts, email-templates.ts,
-                         schemas.ts, presets.ts, matching-types.ts,
-                         text-normalize.ts, client-api-key.ts, db.ts
-prisma/schema.prisma    Case / Requirement / Document / RequirementMatch / EmailDraft
+                         notice-templates.ts, notice-schemas.ts, schemas.ts,
+                         presets.ts, matching-types.ts, text-normalize.ts,
+                         client-api-key.ts, db.ts
+prisma/schema.prisma    Case / CaseParty / CaseAnalysis / Requirement /
+                         Document / RequirementMatch / EmailDraft / Notice
 locales/ar.json         Arabic string dictionary reference
 ```
 

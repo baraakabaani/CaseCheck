@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { updateCaseSchema } from "@/lib/schemas";
 import { deleteStoredFile } from "@/lib/file-storage";
@@ -12,6 +13,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   const found = await prisma.case.findUnique({
     where: { id },
     include: {
+      parties: { orderBy: { order: "asc" } },
       requirements: {
         orderBy: { order: "asc" },
         include: {
@@ -20,6 +22,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
       },
       documents: { orderBy: { uploadedAt: "desc" } },
       emailDrafts: { orderBy: { createdAt: "desc" }, take: 5 },
+      notices: { orderBy: { createdAt: "desc" } },
+      analyses: { orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
 
@@ -41,17 +45,46 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     );
   }
 
-  const { requirements: _requirements, clientEmail, ...rest } = parsed.data;
-  void _requirements; // requirements are managed via their own sub-resource
+  // claimants/respondents are only set at creation (Phase 1, POST /api/cases)
+  // — editing the party list is not yet supported via this general PATCH.
+  const {
+    claimants: _claimants,
+    respondents: _respondents,
+    clientEmail,
+    title,
+    committeeMembers,
+    mandateNature,
+    mandateDecisionDate,
+    mandateReceivedDate,
+    mandateAcceptedDate,
+    nextHearingDate,
+    reportDeadlineDate,
+    ...rest
+  } = parsed.data;
+  void _claimants;
+  void _respondents;
+
+  const data: Prisma.CaseUpdateInput = { ...rest };
+  if (title) data.title = title;
+  if (clientEmail !== undefined) data.clientEmail = clientEmail || null;
+  if (committeeMembers !== undefined) data.committeeMembers = JSON.stringify(committeeMembers);
+  if (mandateNature !== undefined) data.mandateNature = JSON.stringify(mandateNature);
+  if (mandateDecisionDate !== undefined) data.mandateDecisionDate = new Date(mandateDecisionDate);
+  if (mandateReceivedDate !== undefined) {
+    data.mandateReceivedDate = mandateReceivedDate ? new Date(mandateReceivedDate) : null;
+  }
+  if (mandateAcceptedDate !== undefined) {
+    data.mandateAcceptedDate = mandateAcceptedDate ? new Date(mandateAcceptedDate) : null;
+  }
+  if (nextHearingDate !== undefined) {
+    data.nextHearingDate = nextHearingDate ? new Date(nextHearingDate) : null;
+  }
+  if (reportDeadlineDate !== undefined) {
+    data.reportDeadlineDate = reportDeadlineDate ? new Date(reportDeadlineDate) : null;
+  }
 
   try {
-    const updated = await prisma.case.update({
-      where: { id },
-      data: {
-        ...rest,
-        ...(clientEmail !== undefined ? { clientEmail: clientEmail || null } : {}),
-      },
-    });
+    const updated = await prisma.case.update({ where: { id }, data });
     return NextResponse.json({ case: updated });
   } catch {
     return NextResponse.json({ error: "الدعوى غير موجودة" }, { status: 404 });

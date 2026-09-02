@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { createCaseSchema } from "@/lib/schemas";
-import { findPresetItem } from "@/lib/presets";
+import { caseIntakeStep1Schema } from "@/lib/schemas";
 
 export async function GET() {
   const cases = await prisma.case.findMany({
@@ -9,6 +8,7 @@ export async function GET() {
     include: {
       _count: { select: { documents: true, requirements: true } },
       requirements: { select: { status: true } },
+      parties: { orderBy: { order: "asc" } },
     },
   });
 
@@ -30,9 +30,11 @@ export async function GET() {
   return NextResponse.json({ cases: withMetrics });
 }
 
+// المرحلة 1 — بيانات القضية الأساسية. ينشئ الدعوى بحالة DRAFT_PHASE_2 ليكمل
+// المستخدم بقية معالج الفتح (بيانات المأمورية، رفع المستندات، التحليل الأولي).
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const parsed = createCaseSchema.safeParse(body);
+  const parsed = caseIntakeStep1Schema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "بيانات غير صالحة", issues: parsed.error.issues },
@@ -40,32 +42,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { requirements, clientEmail, ...caseData } = parsed.data;
+  const { claimants, respondents, clientEmail, title, ...rest } = parsed.data;
 
   const created = await prisma.case.create({
     data: {
-      ...caseData,
+      ...rest,
+      title: title?.trim() || rest.caseNumber,
       clientEmail: clientEmail || null,
-      requirements: {
-        create: requirements.map((r, index) => {
-          const preset = r.presetKey
-            ? findPresetItem(caseData.caseType, r.presetKey)
-            : undefined;
-          return {
-            presetKey: r.presetKey ?? null,
-            labelAr: r.labelAr,
-            labelEn: r.labelEn ?? preset?.labelEn ?? null,
-            category: r.category ?? preset?.category ?? null,
-            description: r.description ?? preset?.description ?? null,
-            periodStart: r.periodStart ? new Date(r.periodStart) : null,
-            periodEnd: r.periodEnd ? new Date(r.periodEnd) : null,
-            isRequired: r.isRequired,
-            order: r.order ?? index,
-          };
-        }),
+      caseType: "ACCOUNTING_EXPERT",
+      intakeStatus: "DRAFT_PHASE_2",
+      parties: {
+        create: [
+          ...claimants.map((name, order) => ({ role: "CLAIMANT", name, order })),
+          ...respondents.map((name, order) => ({ role: "RESPONDENT", name, order })),
+        ],
       },
     },
-    include: { requirements: true },
+    include: { parties: true },
   });
 
   return NextResponse.json({ case: created }, { status: 201 });

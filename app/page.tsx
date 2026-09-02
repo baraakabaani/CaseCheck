@@ -5,8 +5,10 @@ import { MetricCards } from "@/components/MetricCards";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, FileStack, FolderOpen } from "lucide-react";
+import { Plus, FileStack, FolderOpen, CircleDashed } from "lucide-react";
 import { formatDate } from "@/lib/format";
+import { intakeNextPath, INTAKE_STATUS_LABELS } from "@/lib/case-intake-labels";
+import type { IntakeStatus } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +23,7 @@ export default async function DashboardPage() {
     include: {
       _count: { select: { documents: true } },
       requirements: { select: { status: true } },
+      parties: { orderBy: { order: "asc" } },
     },
   });
 
@@ -87,8 +90,14 @@ export default async function DashboardPage() {
               const provided = c.requirements.filter(
                 (r) => r.status === "PROVIDED",
               ).length;
+              const isMidIntake = c.intakeStatus !== "ACTIVE";
+              const href = isMidIntake
+                ? (intakeNextPath(c.id, c.intakeStatus as IntakeStatus) ?? `/cases/${c.id}`)
+                : `/cases/${c.id}`;
+              const claimants = c.parties.filter((p) => p.role === "CLAIMANT");
+
               return (
-                <Link key={c.id} href={`/cases/${c.id}`}>
+                <Link key={c.id} href={href}>
                   <Card className="h-full transition-colors hover:border-primary/50 hover:bg-accent/40">
                     <CardContent className="flex h-full flex-col gap-3">
                       <div className="flex items-start justify-between gap-2">
@@ -98,15 +107,31 @@ export default async function DashboardPage() {
                             رقم الدعوى: {c.caseNumber}
                           </div>
                         </div>
-                        <Badge variant="secondary" className="shrink-0">
-                          {CASE_TYPE_LABELS[c.caseType] ?? c.caseType}
-                        </Badge>
+                        {isMidIntake ? (
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 gap-1 border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
+                          >
+                            <CircleDashed className="size-3.5" />
+                            قيد الفتح
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="shrink-0">
+                            {CASE_TYPE_LABELS[c.caseType] ?? c.caseType}
+                          </Badge>
+                        )}
                       </div>
 
-                      {c.clientName && (
+                      {isMidIntake ? (
                         <div className="text-sm text-muted-foreground">
-                          المتعامل: {c.clientName}
+                          الخطوة التالية: {INTAKE_STATUS_LABELS[c.intakeStatus as IntakeStatus]}
                         </div>
+                      ) : (
+                        claimants.length > 0 && (
+                          <div className="text-sm text-muted-foreground">
+                            المدعي: {claimants.map((p) => p.name).join("، ")}
+                          </div>
+                        )
                       )}
 
                       <div className="mt-auto flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">

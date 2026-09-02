@@ -12,27 +12,66 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// A legal case / accounting-expert file being audited.
+// A legal case / accounting-expert file being audited. Opened through the
+// 4-phase judicial-expertise intake wizard (see intakeStatus).
 // ---------------------------------------------------------------------------
 model Case {
-  id             String   @id @default(cuid())
-  caseNumber     String // رقم الدعوى
-  title          String // عنوان/موضوع الدعوى
-  court          String? // المحكمة / الجهة القضائية
-  caseType       String   @default("LITIGATION") // LITIGATION | ACCOUNTING_EXPERT
-  claimantName   String? // اسم المدعي
-  respondentName String? // اسم المدعى عليه
-  clientName     String? // اسم المتعامل (من نتلقى منه المستندات)
-  clientEmail    String? // البريد الإلكتروني للمتعامل
-  notes          String?
-  status         String   @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | ARCHIVED
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String  @id @default(cuid())
+  // --- المرحلة 1: بيانات القضية الأساسية ---
+  caseNumber       String // رقم الدعوى
+  title            String // عنوان/موضوع الدعوى (عنوان مختصر للقضية)
+  court            String? // المحكمة / الجهة القضائية
+  circuit          String? // الدائرة
+  litigationDegree String? // FIRST_INSTANCE | APPEAL | EXECUTION | OTHER
+  caseCategory     String? // نوع الدعوى: COMMERCIAL | CIVIL | REAL_ESTATE | LABOR | OTHER
+  caseType         String  @default("ACCOUNTING_EXPERT") // LITIGATION | ACCOUNTING_EXPERT — selects which lib/presets.ts group applies
+  notes            String? // ملاحظات أولية
 
+  // --- المرحلة 2: بيانات مأمورية الخبرة ---
+  mandateDecisionDate DateTime? // تاريخ قرار / حكم ندب الخبرة
+  mandateReceivedDate DateTime? // تاريخ استلام المأمورية
+  mandateAcceptedDate DateTime? // تاريخ قبول المأمورية
+  nextHearingDate     DateTime? // تاريخ الجلسة القادمة
+  reportDeadlineDate  DateTime? // آخر موعد لإيداع تقرير الخبرة
+  appointmentCapacity String? // SOLE_EXPERT | COMMITTEE_CHAIR | COMMITTEE_MEMBER
+  committeeMembers    String? // JSON: [{ name, specialization }] — إن كانت لجنة خبراء
+  mandateNature       String? // JSON string[] من طبيعة المأمورية الحسابية (فحص وتدقيق الحسابات...)
+  mandateNotes        String? // ملاحظات على المأمورية
+
+  // تتبّع تقدّم المعالج (wizard) حتى يمكن استئناف ملف لم يُستكمل فتحه
+  intakeStatus String @default("DRAFT_PHASE_1") // DRAFT_PHASE_1..4 | ACTIVE
+
+  // مراسلة المتعامل (خطاب "استكمال المستندات" — منفصل عن وكلاء الأطراف في الإخطار)
+  clientName  String? // اسم المتعامل (من نتلقى منه المستندات)
+  clientEmail String? // البريد الإلكتروني للمتعامل
+
+  status    String   @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | ARCHIVED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parties      CaseParty[]
   requirements Requirement[]
   documents    Document[]
   emailDrafts  EmailDraft[]
   notices      Notice[]
+  analyses     CaseAnalysis[]
+}
+
+// ---------------------------------------------------------------------------
+// A claimant/respondent party on a case (المدعي / المستأنف .. المدعى عليه /
+// المستأنف ضده) — a case can have more than one of each.
+// ---------------------------------------------------------------------------
+model CaseParty {
+  id     String @id @default(cuid())
+  caseId String
+  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  role   String // CLAIMANT | RESPONDENT
+  name   String
+  order  Int    @default(0)
+
+  submittedDocuments Document[]
+
+  @@index([caseId])
 }
 
 // ---------------------------------------------------------------------------
@@ -87,9 +126,16 @@ model Document {
   pageCount      Int?
   uploadedAt     DateTime @default(now())
 
+  // مُعبّأة من التحليل الأولي بالذكاء الاصطناعي (المرحلة 4) — تصنيف المستند
+  // وتحديد الطرف الذي قدّمه، دون الحاجة لتصنيف يدوي عند الرفع.
+  docCategory        String? // PRELIMINARY_RULING | STATEMENT_OF_CLAIM | PARTY_MEMO | PARTY_ATTACHMENT | OTHER_JUDICIAL | UNSPECIFIED
+  submittedByPartyId String?
+  submittedByParty   CaseParty? @relation(fields: [submittedByPartyId], references: [id], onDelete: SetNull)
+
   matches RequirementMatch[]
 
   @@index([caseId])
+  @@index([submittedByPartyId])
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +209,38 @@ model Notice {
   expertRegistrationNumber String // رقم القيد وزارة العدل
 
   createdAt DateTime @default(now())
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// المرحلة 4 — التحليل الأولي لملف الدعوى: تقرير مبدئي يقرأه الخبير ويعتمده،
+// يُنتج بالذكاء الاصطناعي (أو بمحرك احتياطي محدود بدون مفتاح API) من كامل
+// المستندات المرفوعة في المرحلة 3. عند الاعتماد تتحوّل missingDocuments إلى
+// صفوف Requirement فعلية، فتستمر شاشة المتطلبات ونموذج الإخطار بالعمل دون
+// أي تعديل.
+// ---------------------------------------------------------------------------
+model CaseAnalysis {
+  id     String @id @default(cuid())
+  caseId String
+  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  status String @default("DRAFT") // DRAFT | APPROVED
+  mode   String // AI | OFFLINE
+
+  caseSummary  String // ملخص الدعوى
+  mandateText  String // نص مأمورية الخبرة كما ورد في الحكم
+  mandateTasks String // JSON string[] — تقسيم المأمورية إلى مهام
+
+  receivedDocumentsSummary String // JSON: [{ documentId, submittedByPartyId, periodLabel, status }]
+  missingDocuments         String // JSON: [{ item, requestedFromPartyId, reason, relatedTask }]
+  unclearPoints            String // JSON string[]
+  claimantQuestions        String // JSON string[]
+  respondentQuestions      String // JSON string[]
+  expertNotes              String // ملاحظات أولية للخبير
+
+  createdAt  DateTime  @default(now())
+  approvedAt DateTime?
 
   @@index([caseId])
 }

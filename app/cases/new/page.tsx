@@ -1,5 +1,6 @@
 import { AppHeader } from "@/components/AppHeader";
-import { CaseForm } from "@/components/CaseForm";
+import { WizardSteps } from "@/components/WizardSteps";
+import { CaseIntakeStep1Form } from "@/components/CaseIntakeStep1Form";
 
 export default function NewCasePage() {
   return (
@@ -7,12 +8,13 @@ export default function NewCasePage() {
       <AppHeader />
       <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8 sm:px-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold">إنشاء ملف دعوى جديد</h1>
+          <h1 className="text-2xl font-bold">فتح ملف دعوى جديد</h1>
           <p className="text-sm text-muted-foreground">
-            أدخل بيانات الدعوى وحدد قائمة المستندات المطلوبة لبدء عملية التدقيق
+            المرحلة 1 من 4 — بيانات القضية الأساسية
           </p>
         </div>
-        <CaseForm />
+        <WizardSteps current={1} />
+        <CaseIntakeStep1Form />
       </main>
     </div>
   );

@@ -23,10 +23,13 @@ export function NoticeForm({
   caseId,
   caseNumber,
   suggestedItems,
+  defaultMeetingDate,
 }: {
   caseId: string;
   caseNumber: string;
   suggestedItems: string[];
+  /** مُعبّأة من تاريخ الجلسة القادمة للدعوى إن وُجد (YYYY-MM-DD) */
+  defaultMeetingDate?: string | null;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -38,7 +41,7 @@ export function NoticeForm({
   const [referenceLetterNumber, setReferenceLetterNumber] = useState("");
   const [referenceLetterDate, setReferenceLetterDate] = useState("");
 
-  const [meetingDate, setMeetingDate] = useState("");
+  const [meetingDate, setMeetingDate] = useState(defaultMeetingDate ?? "");
   const [meetingTimeLabel, setMeetingTimeLabel] = useState("");
   const [meetingMethod, setMeetingMethod] = useState(
     "تقنية الاتصال المرئي بواسطة تطبيق تقنية ZOOM MEETING",

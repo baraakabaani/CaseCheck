@@ -14,7 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, CheckCircle2, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { Loader2, CheckCircle2, Sparkles, Mail } from "lucide-react";
 import type {
   MissingDocumentItem,
   ReceivedDocumentSummary,
@@ -174,8 +175,10 @@ export function CaseAnalysisReview({
                     <TableRow key={i}>
                       <TableCell className="font-medium">{m.item}</TableCell>
                       <TableCell>
-                        {m.requestedFromPartyId
-                          ? (partyById.get(m.requestedFromPartyId)?.name ?? "—")
+                        {m.requestedFromPartyIds.length > 0
+                          ? m.requestedFromPartyIds
+                              .map((id) => partyById.get(id)?.name ?? "—")
+                              .join("، ")
                           : "غير محدد"}
                       </TableCell>
                       <TableCell className="max-w-64 text-sm text-muted-foreground">
@@ -271,7 +274,16 @@ export function CaseAnalysisReview({
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
+        {parsed.missingDocuments.length > 0 && (
+          <Button variant="outline" asChild>
+            <Link href={`/cases/${caseId}/notices/new?fromAnalysisId=${analysis.id}`}>
+              <Mail className="size-4" />
+              توليد إشعار النواقص ودعوة الاجتماع الأول
+            </Link>
+          </Button>
+        )}
+
         {analysis.status === "APPROVED" ? (
           <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700">
             <CheckCircle2 className="size-3.5" />

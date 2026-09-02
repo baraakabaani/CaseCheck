@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,13 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import {
   APPOINTMENT_CAPACITIES,
@@ -24,6 +18,7 @@ import {
   type MandateNatureOption,
 } from "@/lib/schemas";
 import { APPOINTMENT_CAPACITY_LABELS, MANDATE_NATURE_LABELS } from "@/lib/case-intake-labels";
+import { loadFormDraft, saveFormDraft, clearFormDraft } from "@/lib/form-draft";
 
 interface CommitteeMemberDraft {
   key: string;
@@ -31,9 +26,22 @@ interface CommitteeMemberDraft {
   specialization: string;
 }
 
+interface Step2Draft {
+  mandateDecisionDate: string;
+  mandateReceivedDate: string;
+  mandateAcceptedDate: string;
+  nextHearingDate: string;
+  reportDeadlineDate: string;
+  appointmentCapacity: AppointmentCapacity;
+  committeeMembers: Omit<CommitteeMemberDraft, "key">[];
+  mandateNature: MandateNatureOption[];
+  mandateNotes: string;
+}
+
 export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const draftKey = `case-intake-step2-draft-${caseId}`;
 
   const [mandateDecisionDate, setMandateDecisionDate] = useState("");
   const [mandateReceivedDate, setMandateReceivedDate] = useState("");
@@ -56,6 +64,58 @@ export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
       return next;
     });
   }
+
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const draft = loadFormDraft<Step2Draft>(draftKey);
+    if (!draft) return;
+    // One-time mount-only localStorage hydration, guarded by `restored`
+    // above; not reactive to any prop/state so it cannot cascade.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (draft.mandateDecisionDate) setMandateDecisionDate(draft.mandateDecisionDate);
+    if (draft.mandateReceivedDate) setMandateReceivedDate(draft.mandateReceivedDate);
+    if (draft.mandateAcceptedDate) setMandateAcceptedDate(draft.mandateAcceptedDate);
+    if (draft.nextHearingDate) setNextHearingDate(draft.nextHearingDate);
+    if (draft.reportDeadlineDate) setReportDeadlineDate(draft.reportDeadlineDate);
+    if (draft.appointmentCapacity) setAppointmentCapacity(draft.appointmentCapacity);
+    if (draft.committeeMembers?.length) {
+      setCommitteeMembers(draft.committeeMembers.map((m) => ({ ...m, key: crypto.randomUUID() })));
+    }
+    if (draft.mandateNature?.length) setMandateNature(new Set(draft.mandateNature));
+    if (draft.mandateNotes) setMandateNotes(draft.mandateNotes);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!restored.current) return;
+    saveFormDraft<Step2Draft>(draftKey, {
+      mandateDecisionDate,
+      mandateReceivedDate,
+      mandateAcceptedDate,
+      nextHearingDate,
+      reportDeadlineDate,
+      appointmentCapacity,
+      committeeMembers: committeeMembers.map(({ name, specialization }) => ({
+        name,
+        specialization,
+      })),
+      mandateNature: Array.from(mandateNature),
+      mandateNotes,
+    });
+  }, [
+    draftKey,
+    mandateDecisionDate,
+    mandateReceivedDate,
+    mandateAcceptedDate,
+    nextHearingDate,
+    reportDeadlineDate,
+    appointmentCapacity,
+    committeeMembers,
+    mandateNature,
+    mandateNotes,
+  ]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -95,6 +155,7 @@ export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "فشل حفظ بيانات المأمورية");
 
+      clearFormDraft(draftKey);
       toast.success("تم حفظ بيانات مأمورية الخبرة");
       router.push(`/cases/${caseId}/setup/documents`);
     } catch (err) {
@@ -165,23 +226,21 @@ export function CaseIntakeStep2Form({ caseId }: { caseId: string }) {
           <CardTitle>صفة الندب</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5 sm:w-72">
-            <Select
-              value={appointmentCapacity}
-              onValueChange={(v) => setAppointmentCapacity(v as AppointmentCapacity)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {APPOINTMENT_CAPACITIES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {APPOINTMENT_CAPACITY_LABELS[c]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <RadioGroup
+            value={appointmentCapacity}
+            onValueChange={(v) => setAppointmentCapacity(v as AppointmentCapacity)}
+            className="gap-2 sm:w-96"
+          >
+            {APPOINTMENT_CAPACITIES.map((c) => (
+              <label
+                key={c}
+                className="flex items-center gap-2 rounded-md border p-3 text-sm hover:bg-accent/40"
+              >
+                <RadioGroupItem value={c} />
+                {APPOINTMENT_CAPACITY_LABELS[c]}
+              </label>
+            ))}
+          </RadioGroup>
 
           {isCommittee && (
             <div className="flex flex-col gap-2 border-t pt-4">

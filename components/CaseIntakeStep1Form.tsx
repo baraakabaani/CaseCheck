@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,23 @@ import {
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { LITIGATION_DEGREES, CASE_CATEGORIES, type LitigationDegree, type CaseCategory } from "@/lib/schemas";
 import { LITIGATION_DEGREE_LABELS, CASE_CATEGORY_LABELS } from "@/lib/case-intake-labels";
+import { loadFormDraft, saveFormDraft, clearFormDraft } from "@/lib/form-draft";
+
+const DRAFT_KEY = "case-intake-step1-draft";
+
+interface Step1Draft {
+  caseNumber: string;
+  court: string;
+  circuit: string;
+  litigationDegree: LitigationDegree;
+  caseCategory: CaseCategory;
+  title: string;
+  claimants: string[];
+  respondents: string[];
+  notes: string;
+  clientName: string;
+  clientEmail: string;
+}
 
 function PartyListEditor({
   label,
@@ -79,6 +96,61 @@ export function CaseIntakeStep1Form() {
   const [clientName, setClientName] = useState("");
   const [clientEmail, setClientEmail] = useState("");
 
+  // استعادة المسودة المحفوظة محلياً (إن وُجدت) بعد التحميل الأول فقط، لتفادي
+  // أي تعارض بين عرض الخادم وعرض المتصفح الأول. مضبوطة بمرجع (ref) فلا تُنفَّذ
+  // إلا مرة واحدة عند التركيب — لا تعتمد على أي حالة متغيّرة تسبب حلقة تحديث.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const draft = loadFormDraft<Step1Draft>(DRAFT_KEY);
+    if (!draft) return;
+    // One-time mount-only localStorage hydration, guarded by `restored`
+    // above; not reactive to any prop/state so it cannot cascade.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (draft.caseNumber) setCaseNumber(draft.caseNumber);
+    if (draft.court) setCourt(draft.court);
+    if (draft.circuit) setCircuit(draft.circuit);
+    if (draft.litigationDegree) setLitigationDegree(draft.litigationDegree);
+    if (draft.caseCategory) setCaseCategory(draft.caseCategory);
+    if (draft.title) setTitle(draft.title);
+    if (draft.claimants?.length) setClaimants(draft.claimants);
+    if (draft.respondents?.length) setRespondents(draft.respondents);
+    if (draft.notes) setNotes(draft.notes);
+    if (draft.clientName) setClientName(draft.clientName);
+    if (draft.clientEmail) setClientEmail(draft.clientEmail);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    if (!restored.current) return;
+    saveFormDraft<Step1Draft>(DRAFT_KEY, {
+      caseNumber,
+      court,
+      circuit,
+      litigationDegree,
+      caseCategory,
+      title,
+      claimants,
+      respondents,
+      notes,
+      clientName,
+      clientEmail,
+    });
+  }, [
+    caseNumber,
+    court,
+    circuit,
+    litigationDegree,
+    caseCategory,
+    title,
+    claimants,
+    respondents,
+    notes,
+    clientName,
+    clientEmail,
+  ]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
@@ -115,6 +187,7 @@ export function CaseIntakeStep1Form() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "فشل إنشاء ملف الدعوى");
 
+      clearFormDraft(DRAFT_KEY);
       toast.success("تم حفظ بيانات القضية الأساسية");
       router.push(`/cases/${data.case.id}/setup/mandate`);
     } catch (err) {

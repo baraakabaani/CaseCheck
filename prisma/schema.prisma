@@ -233,7 +233,7 @@ model CaseAnalysis {
   mandateTasks String // JSON string[] — تقسيم المأمورية إلى مهام
 
   receivedDocumentsSummary String // JSON: [{ documentId, submittedByPartyId, periodLabel, status }]
-  missingDocuments         String // JSON: [{ item, requestedFromPartyId, reason, relatedTask }]
+  missingDocuments         String // JSON: [{ item, requestedFromPartyIds: string[], reason, relatedTask }]
   unclearPoints            String // JSON string[]
   claimantQuestions        String // JSON string[]
   respondentQuestions      String // JSON string[]

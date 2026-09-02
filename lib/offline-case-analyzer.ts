@@ -41,6 +41,10 @@ export function offlineAnalyzeCaseFile(
     documents.map((d) => `${d.text} ${d.fileName}`).join(" "),
   );
 
+  // بدون ذكاء اصطناعي لا يمكن تحديد الطرف الأنسب لكل بند تحديداً، فالافتراض
+  // الأسلم لمعظم مستندات مأموريات الخبرة المحاسبية هو طلبها من كل الأطراف.
+  const allPartyIds = parties.map((p) => p.id);
+
   const presetGroup = getPresetGroup("ACCOUNTING_EXPERT");
   const missingDocuments = (presetGroup?.items ?? [])
     .filter(
@@ -48,7 +52,7 @@ export function offlineAnalyzeCaseFile(
     )
     .map((item) => ({
       item: item.labelAr,
-      requestedFromPartyId: null,
+      requestedFromPartyIds: allPartyIds,
       reason:
         "من المستندات الشائعة لمأموريات الخبرة المحاسبية ولم يتم العثور عليها ضمن الملف المرفوع (مطابقة آلية بدون ذكاء اصطناعي).",
       relatedTask: null,

@@ -15,7 +15,7 @@ export type ReceivedDocumentSummary = z.infer<typeof receivedDocumentSummarySche
 
 export const missingDocumentItemSchema = z.object({
   item: z.string(), // المستند المطلوب
-  requestedFromPartyId: z.string().optional().nullable(), // المطلوب من أي طرف
+  requestedFromPartyIds: z.array(z.string()).default([]), // المطلوب من أي طرف (قد يكون أكثر من طرف، مثال: المدعي والمدعى عليه معاً)
   reason: z.string(), // سبب طلبه
   relatedTask: z.string().optional().nullable(), // المهمة المرتبطة به
 });

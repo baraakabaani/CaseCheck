@@ -10,6 +10,10 @@ missing. Works with an AI model (Groq, with Gemini as an alternative) when a
 key is available, and falls back to a rule-based local matcher when it
 isn't — no API key is required to use the app.
 
+Styled with **Parker Russell**'s corporate identity (brand tokens in
+`app/globals.css`, logo at `public/parker-russell-logo.png`) and organized
+as a **Modular Milestone Dashboard** — see below.
+
 ## Stack
 
 - **Next.js 16** (App Router, TypeScript, Turbopack) — UI and API routes in one deployable app
@@ -141,16 +145,57 @@ multi-document cases (the model would run out of budget mid-response).
 `lib/ai-matcher.ts` reuses the same per-document digest function
 (`buildSingleDocumentDigest`) for the same reason.
 
+## Case Hub — the 4-module dashboard (لوحة القضية بنظام البطاقات)
+
+Once a case's 4-phase intake wizard reaches `intakeStatus === "ACTIVE"`,
+`/cases/[id]` becomes the **Case Hub** (`components/CaseHub.tsx`): 4
+milestone cards, each linking into its own module page:
+
+1. **الموديول 1 — التأسيس والتدقيق الأولي** (`/cases/[id]/module-1`) — the
+   4-phase wizard's output: checklist matching, documents, client email,
+   and the Phase-4 analysis review. Unchanged functionally, just relocated
+   out from under the old single-page case workspace.
+2. **الموديول 2 — إدارة الاجتماع والتواصل** (`/cases/[id]/module-2`) —
+   readiness checklist (from Module 1's missing-documents list), meeting
+   scheduler (`HearingSession`), attendee/POA registry
+   (`MeetingAttendee`), and the existing إخطار (notice) generation,
+   relocated here from Module 1's tabs.
+3. **الموديول 3 — المتابعة والمعاينة الميدانية** (`/cases/[id]/module-3`) —
+   a status board grouping the checklist by status, and a site-inspection
+   log (`SiteInspection`: visit date/location/purpose/attendees/notes).
+4. **الموديول 4 — صياغة التقرير القضائي** (`/cases/[id]/module-4`) — a
+   5-tab report draft (`CourtReport`: المقدمة والمأمورية | الأطراف
+   والإجراءات | البحث والدراسة | الخلاصة وتصفية الحساب | حافظة
+   المستندات), autosaved, exportable to a Parker Russell–branded `.docx`
+   (`lib/docx-export.ts`'s `buildCourtReportDocxBlob`).
+
+Modules 2–4 are a deliberate **first pass**: real Prisma models and a
+genuinely working page each, reachable and persisted, but not yet the full
+depth of a live hearing room (roll-call, per-party Q&A logging), a
+drag-and-drop Kanban board, or Module 4's AI-aggregated per-task forensic
+sections with color-coded provenance — each is its own follow-up build.
+Modules 2–4 stay locked (dimmed, non-clickable) until Module 1 is complete.
+
+State stays server-authoritative throughout (Prisma/SQLite via
+`lib/queries.ts`'s `getCaseDetail`, `router.refresh()` after any mutation —
+the same pattern used everywhere else in this app), not a separate
+client-side store.
+
 ## Project layout
 
 ```
 app/                    RTL App Router pages + API routes
   cases/new             Phase 1 — case intake wizard entry point
   cases/[id]/setup/      Phases 2–4 — mandate, documents, analysis review
-  cases/[id]            Case workspace (checklist, documents, email, notices)
+  cases/[id]            Case Hub — 4 milestone module cards
+  cases/[id]/module-1/   Checklist, documents, email, analysis review
+  cases/[id]/module-2/   Meeting readiness, scheduler, attendees, notices
+  cases/[id]/module-3/   Status board + site-inspection log
+  cases/[id]/module-4/   Court report draft studio
   cases/[id]/notices/    Expert-meeting notice (إخطار) creation + view
   api/cases/...          REST endpoints backing all of the above
-components/             CaseIntakeStep1Form, CaseIntakeStep2Form,
+components/             CaseHub, ModuleTopBar, Module2Hub, Module3Hub,
+                        Module4Studio, CaseIntakeStep1Form, CaseIntakeStep2Form,
                         CaseDocumentsStep, DocumentSlotUploader,
                         CaseAnalysisReview, WizardSteps, FileUploader,
                         ChecklistTable, EmailPreviewModal, NoticeForm,

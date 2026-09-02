@@ -49,12 +49,16 @@ model Case {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  parties      CaseParty[]
-  requirements Requirement[]
-  documents    Document[]
-  emailDrafts  EmailDraft[]
-  notices      Notice[]
-  analyses     CaseAnalysis[]
+  parties          CaseParty[]
+  requirements     Requirement[]
+  documents        Document[]
+  emailDrafts      EmailDraft[]
+  notices          Notice[]
+  analyses         CaseAnalysis[]
+  meetingAttendees MeetingAttendee[]
+  hearingSession   HearingSession?
+  siteInspections  SiteInspection[]
+  courtReport      CourtReport?
 }
 
 // ---------------------------------------------------------------------------
@@ -243,4 +247,81 @@ model CaseAnalysis {
   approvedAt DateTime?
 
   @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// الموديول 2 — إدارة الاجتماع والتواصل: سجل الحضور/الوكلاء عن كل طرف
+// (POA) لاجتماع الخبرة الأول.
+// ---------------------------------------------------------------------------
+model MeetingAttendee {
+  id     String @id @default(cuid())
+  caseId String
+  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  name              String
+  role              String // CLAIMANT | RESPONDENT | POA | EXPERT | OTHER
+  representingParty String? // اسم الطرف الذي يمثله الوكيل، إن وُجد
+  attendanceStatus  String  @default("PENDING") // PENDING | PRESENT | LATE | ABSENT
+  order             Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// الموديول 2 — حالة الاجتماع الأول (نسخة مبسّطة v1: اجتماع واحد لكل دعوى؛
+// "غرفة إدارة الاجتماع" الحية بالتفصيل الكامل تطوير لاحق).
+// ---------------------------------------------------------------------------
+model HearingSession {
+  id     String @id @default(cuid())
+  caseId String @unique
+  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  status       String    @default("NOT_SCHEDULED") // NOT_SCHEDULED | SCHEDULED | IN_PROGRESS | COMPLETED
+  meetingDate  DateTime?
+  openingNotes String? // ملاحظات/نص افتتاحي حر
+  minutesDraft String? // مسودة محضر الجلسة (نص حر v1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// الموديول 3 — سجل زيارات المعاينة الميدانية (الانتقال والمعاينة).
+// ---------------------------------------------------------------------------
+model SiteInspection {
+  id     String @id @default(cuid())
+  caseId String
+  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  visitDate DateTime
+  location  String
+  purpose   String
+  attendees String? // JSON string[]
+  notes     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// الموديول 4 — استوديو إعداد التقرير القضائي (نسخة مبسّطة v1: حقول نصية
+// حرة لكل تبويب؛ التجميع الآلي والأقسام الديناميكية لكل مهمة تطوير لاحق).
+// ---------------------------------------------------------------------------
+model CourtReport {
+  id     String @id @default(cuid())
+  caseId String @unique
+  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  status String @default("DRAFT") // DRAFT | FINAL
+
+  introductionMandate  String? // المقدمة والمأمورية
+  partiesAndProcedures String? // الأطراف والإجراءات
+  taskAnalysis         String? // البحث والدراسة (المهام)
+  conclusionSettlement String? // الخلاصة وتصفية الحساب
+  documentsIndex       String? // حافظة المستندات
+
+  updatedAt DateTime @updatedAt
 }

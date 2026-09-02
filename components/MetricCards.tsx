@@ -34,7 +34,7 @@ const ITEMS = [
     key: "missing" as const,
     label: "غير مقدمة",
     Icon: FileX2,
-    accent: "text-red-700 bg-red-50 dark:text-red-400 dark:bg-red-950",
+    accent: "text-[#c8102e] bg-[#c8102e0d] dark:text-[#e2334f] dark:bg-[#e2334f1a]",
   },
 ];
 

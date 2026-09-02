@@ -1,8 +1,56 @@
-import { AlignmentType, Document, Packer, Paragraph, TextRun } from "docx";
+import {
+  AlignmentType,
+  BorderStyle,
+  Document,
+  ImageRun,
+  Packer,
+  Paragraph,
+  TextRun,
+} from "docx";
 
 export interface EmailDocxInput {
   subject: string;
   bodyAr: string;
+}
+
+/** Parker Russell corporate letterhead block, prepended to every official
+ * exported .docx (client letters, Module-4 report drafts). Fetches the
+ * logo client-side (this module only ever runs in the browser — see
+ * downloadBlob below) since the `docx` package needs raw image bytes. */
+async function buildBrandedDocxHeader(): Promise<Paragraph[]> {
+  let logoParagraph: Paragraph | null = null;
+  try {
+    const res = await fetch("/parker-russell-logo.png");
+    const data = await res.arrayBuffer();
+    logoParagraph = new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 120 },
+      children: [
+        new ImageRun({
+          type: "png",
+          data,
+          transformation: { width: 170, height: 78 },
+        }),
+      ],
+    });
+  } catch {
+    // Offline/blocked asset fetch — export continues without the logo
+    // image rather than failing the whole document.
+  }
+
+  return [
+    ...(logoParagraph ? [logoParagraph] : []),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 300 },
+      border: {
+        bottom: { style: BorderStyle.SINGLE, size: 8, color: "C8102E", space: 6 },
+      },
+      children: [
+        new TextRun({ text: "Parker Russell", bold: true, size: 22, color: "2C3E50" }),
+      ],
+    }),
+  ];
 }
 
 export async function buildEmailDocxBlob({ subject, bodyAr }: EmailDocxInput): Promise<Blob> {
@@ -20,6 +68,7 @@ export async function buildEmailDocxBlob({ subject, bodyAr }: EmailDocxInput): P
     sections: [
       {
         children: [
+          ...(await buildBrandedDocxHeader()),
           new Paragraph({
             bidirectional: true,
             alignment: AlignmentType.RIGHT,
@@ -35,6 +84,79 @@ export async function buildEmailDocxBlob({ subject, bodyAr }: EmailDocxInput): P
             ],
           }),
           ...bodyParagraphs,
+        ],
+      },
+    ],
+  });
+
+  return Packer.toBlob(doc);
+}
+
+export interface CourtReportDocxSection {
+  title: string;
+  content: string | null;
+}
+
+export interface CourtReportDocxInput {
+  caseNumber: string;
+  caseTitle: string;
+  sections: CourtReportDocxSection[];
+}
+
+/** موديول 4 — استوديو إعداد التقرير القضائي: تصدير أساسي (نص حر لكل
+ * تبويب) بترويسة Parker Russell. التجميع الآلي والأقسام الديناميكية لكل
+ * مهمة (المهمة رقم 1، 2...) والتلوين حسب المصدر تطوير لاحق. */
+export async function buildCourtReportDocxBlob({
+  caseNumber,
+  caseTitle,
+  sections,
+}: CourtReportDocxInput): Promise<Blob> {
+  const sectionParagraphs = sections.flatMap((s) => [
+    new Paragraph({
+      bidirectional: true,
+      alignment: AlignmentType.RIGHT,
+      spacing: { before: 300, after: 120 },
+      children: [new TextRun({ text: s.title, bold: true, size: 26, rightToLeft: true, font: "Arial" })],
+    }),
+    ...(s.content || "لم تتم تعبئة هذا القسم بعد.")
+      .split("\n")
+      .map(
+        (line) =>
+          new Paragraph({
+            bidirectional: true,
+            alignment: AlignmentType.RIGHT,
+            spacing: { after: 140 },
+            children: [new TextRun({ text: line, rightToLeft: true, font: "Arial" })],
+          }),
+      ),
+  ]);
+
+  const doc = new Document({
+    sections: [
+      {
+        children: [
+          ...(await buildBrandedDocxHeader()),
+          new Paragraph({
+            bidirectional: true,
+            alignment: AlignmentType.RIGHT,
+            spacing: { after: 60 },
+            children: [
+              new TextRun({
+                text: `تقرير الخبرة الحسابية القضائية — الدعوى رقم ${caseNumber}`,
+                bold: true,
+                size: 28,
+                rightToLeft: true,
+                font: "Arial",
+              }),
+            ],
+          }),
+          new Paragraph({
+            bidirectional: true,
+            alignment: AlignmentType.RIGHT,
+            spacing: { after: 300 },
+            children: [new TextRun({ text: caseTitle, size: 22, rightToLeft: true, font: "Arial" })],
+          }),
+          ...sectionParagraphs,
         ],
       },
     ],

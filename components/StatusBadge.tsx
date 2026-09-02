@@ -21,8 +21,7 @@ const STATUS_CONFIG: Record<
   },
   MISSING: {
     label: "غير مقدم",
-    className:
-      "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-900",
+    className: "bg-[#c8102e0d] text-[#c8102e] border-[#c8102e33] dark:bg-[#e2334f1a] dark:text-[#e2334f] dark:border-[#e2334f4d]",
     Icon: CircleDashed,
   },
   NOT_ANALYZED: {

@@ -103,27 +103,9 @@ export function ApiKeySettingsDialog() {
         </DialogHeader>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="geminiApiKey">
-            مفتاح Gemini API <span className="text-muted-foreground">(موصى به)</span>
+          <Label htmlFor="groqApiKey">
+            مفتاح Groq API <span className="text-muted-foreground">(موصى به)</span>
           </Label>
-          <Input
-            id="geminiApiKey"
-            type="password"
-            dir="ltr"
-            placeholder="AQ...."
-            value={geminiValue}
-            onChange={(e) => setGeminiValue(e.target.value)}
-            autoComplete="off"
-          />
-          <p className="text-xs text-muted-foreground">
-            يُستخدم أولاً عند توفره — حصة مجانية أكبر وسياق أوسع من Groq، فلا يحتاج لتقليم
-            محتوى المستندات الطويلة. احصل عليه من{" "}
-            <span dir="ltr">aistudio.google.com/app/api-keys</span>.
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="groqApiKey">مفتاح Groq API (اختياري)</Label>
           <Input
             id="groqApiKey"
             type="password"
@@ -134,7 +116,24 @@ export function ApiKeySettingsDialog() {
             autoComplete="off"
           />
           <p className="text-xs text-muted-foreground">
-            يُستخدم فقط إن لم يتوفر مفتاح Gemini. إن تركت كلا الحقلين فارغَين، سيحاول التطبيق
+            يُستخدم أولاً عند توفره. احصل عليه من{" "}
+            <span dir="ltr">console.groq.com/keys</span>.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="geminiApiKey">مفتاح Gemini API (اختياري)</Label>
+          <Input
+            id="geminiApiKey"
+            type="password"
+            dir="ltr"
+            placeholder="AQ...."
+            value={geminiValue}
+            onChange={(e) => setGeminiValue(e.target.value)}
+            autoComplete="off"
+          />
+          <p className="text-xs text-muted-foreground">
+            يُستخدم فقط إن لم يتوفر مفتاح Groq. إن تركت كلا الحقلين فارغَين، سيحاول التطبيق
             استخدام مفتاح مُهيأ على الخادم إن وُجد، وإلا سيتم اعتماد المطابقة الآلية الاحتياطية
             (بدون ذكاء اصطناعي) تلقائياً.
           </p>

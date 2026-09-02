@@ -4,12 +4,12 @@ import { GEMINI_API_KEY_HEADER, GROQ_API_KEY_HEADER } from "./api-key-header";
 export type AiProvider = "gemini" | "groq";
 
 // gemini-3.6-flash: verified live (2026-09-02) against Gemini's
-// OpenAI-compatible endpoint with response_format: json_object. Gemini's
-// free tier has a far larger token budget and ~1M token context window
-// than Groq's free "on_demand" tier (8,000 tokens/minute, see
-// lib/ai-matcher.ts / lib/case-analyzer.ts and README "Notes &
-// limitations"), which is why it's preferred here when both are
-// available — it removes the truncation problem for most real cases.
+// OpenAI-compatible endpoint with response_format: json_object. Its free
+// tier has a much larger *token* budget and ~1M token context window than
+// Groq's free "on_demand" tier (8,000 tokens/minute) — but its free tier's
+// *request-rate* limit is tight enough to hit HTTP 429 in normal use, so
+// it's kept as a fallback/alternative provider, not the primary one (see
+// resolveAiKey below).
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 
 // qwen/qwen3.8-27b, not one of the openai/gpt-oss-* models: those are
@@ -79,20 +79,25 @@ export interface ClientApiKeys {
 }
 
 /**
- * Resolution order per request — Gemini is preferred over Groq whenever a
- * usable Gemini key is available (see GEMINI_MODEL comment above for why):
- *   1. client-provided Gemini key (typed into the UI, sent as a header)
- *   2. client-provided Groq key
- *   3. server GEMINI_API_KEY
- *   4. server GROQ_API_KEY
+ * Resolution order per request — Groq is preferred over Gemini:
+ *   1. client-provided Groq key (typed into the UI, sent as a header)
+ *   2. client-provided Gemini key
+ *   3. server GROQ_API_KEY
+ *   4. server GEMINI_API_KEY
  *   5. none of the above → null, caller falls back to its offline heuristic
+ *
+ * Gemini was briefly tried as the primary provider (larger free-tier token
+ * budget, ~1M token context — see GEMINI_MODEL comment below) but its free
+ * tier's *request-rate* limit (not just tokens/minute) turned out to be
+ * tight enough to hit HTTP 429 in normal use, so Groq is primary again.
+ * Gemini stays available as a fallback/alternative if a key is configured.
  */
 export function resolveAiKey(clientKeys?: ClientApiKeys | null): ResolvedAiKey | null {
-  const gemini = clientKeys?.gemini?.trim() || process.env.GEMINI_API_KEY?.trim();
-  if (gemini) return { provider: "gemini", apiKey: gemini, model: GEMINI_MODEL };
-
   const groq = clientKeys?.groq?.trim() || process.env.GROQ_API_KEY?.trim();
   if (groq) return { provider: "groq", apiKey: groq, model: GROQ_MODEL };
+
+  const gemini = clientKeys?.gemini?.trim() || process.env.GEMINI_API_KEY?.trim();
+  if (gemini) return { provider: "gemini", apiKey: gemini, model: GEMINI_MODEL };
 
   return null;
 }

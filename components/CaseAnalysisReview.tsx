@@ -15,7 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import Link from "next/link";
-import { Loader2, CheckCircle2, Sparkles, Mail } from "lucide-react";
+import { Loader2, CheckCircle2, Sparkles, Mail, ArrowRight } from "lucide-react";
 import type {
   MissingDocumentItem,
   ReceivedDocumentSummary,
@@ -274,27 +274,36 @@ export function CaseAnalysisReview({
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap justify-end gap-2">
-        {parsed.missingDocuments.length > 0 && (
-          <Button variant="outline" asChild>
-            <Link href={`/cases/${caseId}/notices/new?fromAnalysisId=${analysis.id}`}>
-              <Mail className="size-4" />
-              توليد إشعار النواقص ودعوة الاجتماع الأول
-            </Link>
-          </Button>
-        )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Button variant="ghost" asChild>
+          <Link href={`/cases/${caseId}/setup/documents`}>
+            <ArrowRight className="size-4" />
+            رجوع لتعديل المستندات
+          </Link>
+        </Button>
 
-        {analysis.status === "APPROVED" ? (
-          <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700">
-            <CheckCircle2 className="size-3.5" />
-            تم الاعتماد
-          </Badge>
-        ) : (
-          <Button onClick={handleApprove} disabled={approving} size="lg">
-            {approving ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            مراجعة واعتماد التحليل الأولي
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {parsed.missingDocuments.length > 0 && (
+            <Button variant="outline" asChild>
+              <Link href={`/cases/${caseId}/notices/new?fromAnalysisId=${analysis.id}`}>
+                <Mail className="size-4" />
+                توليد إشعار النواقص ودعوة الاجتماع الأول
+              </Link>
+            </Button>
+          )}
+
+          {analysis.status === "APPROVED" ? (
+            <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700">
+              <CheckCircle2 className="size-3.5" />
+              تم الاعتماد
+            </Badge>
+          ) : (
+            <Button onClick={handleApprove} disabled={approving} size="lg">
+              {approving ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              مراجعة واعتماد التحليل الأولي
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

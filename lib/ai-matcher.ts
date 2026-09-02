@@ -16,7 +16,13 @@ export interface MatchOutcome {
   warning?: string;
 }
 
-const MAX_DOC_CHARS_IN_PROMPT = 6000;
+// Groq's free "on_demand" tier caps requests at 8,000 tokens/minute
+// (prompt_tokens + max_tokens, reserved up front) — this is a *total*
+// character budget shared across all documents (see buildDocumentsBlock),
+// not a flat per-document cap, so a case with many/long documents still
+// gets a real (if partial) AI pass instead of blowing the limit outright.
+const TOTAL_DOCUMENT_CHARS_BUDGET = 9000; // ≈ 3,000 tokens at ~3 chars/token for Arabic-heavy text
+const MAX_DOC_CHARS_IN_PROMPT = 6000; // ceiling for any single document within that shared budget
 
 const SYSTEM_PROMPT = `أنت خبير قانوني ومحاسبي متخصص في تدقيق ملفات الدعاوى القضائية والخبرة المحاسبية في محاكم دولة الإمارات العربية المتحدة.
 
@@ -37,25 +43,58 @@ const SYSTEM_PROMPT = `أنت خبير قانوني ومحاسبي متخصص ف
 يجب أن يكون ردك بصيغة JSON صالحة فقط، مطابقة تماماً لمخطط JSON التالي، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown:
 {{JSON_SCHEMA}}`;
 
-function buildDocumentsBlock(documents: MatchDocumentInput[]): string {
-  return documents
-    .map((d, i) => {
-      const excerpt = d.text?.trim()
-        ? d.text.slice(0, MAX_DOC_CHARS_IN_PROMPT)
-        : "(تعذر استخراج نص من هذا الملف)";
-      return [
+function buildDocumentsBlock(documents: MatchDocumentInput[]): {
+  block: string;
+  skippedCount: number;
+  truncatedCount: number;
+} {
+  let remaining = TOTAL_DOCUMENT_CHARS_BUDGET;
+  let skippedCount = 0;
+  let truncatedCount = 0;
+
+  const parts: string[] = [];
+  for (const [i, d] of documents.entries()) {
+    const fullText = d.text?.trim() || "";
+    if (!fullText) {
+      parts.push(
+        [
+          `[مستند ${i + 1}]`,
+          `documentId: ${d.id}`,
+          `اسم الملف: ${d.fileName}`,
+          `نوع الملف: ${d.fileKind}`,
+          d.note ? `ملاحظة: ${d.note}` : null,
+          `مقتطف من المحتوى:\n"""\n(تعذر استخراج نص من هذا الملف)\n"""`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+      continue;
+    }
+    if (remaining < 200) {
+      skippedCount++;
+      continue;
+    }
+    const cap = Math.min(fullText.length, remaining, MAX_DOC_CHARS_IN_PROMPT);
+    const excerpt = fullText.slice(0, cap);
+    if (excerpt.length < fullText.length) truncatedCount++;
+    remaining -= excerpt.length;
+
+    parts.push(
+      [
         `[مستند ${i + 1}]`,
         `documentId: ${d.id}`,
         `اسم الملف: ${d.fileName}`,
         `نوع الملف: ${d.fileKind}`,
         `تواريخ مكتشفة في النص: ${d.detectedDates.join("، ") || "لا يوجد"}`,
         d.note ? `ملاحظة: ${d.note}` : null,
-        `مقتطف من المحتوى:\n"""\n${excerpt}\n"""`,
+        `مقتطف من المحتوى${excerpt.length < fullText.length ? " (مُختصر لضيق المساحة)" : ""}:\n"""\n${excerpt}\n"""`,
       ]
         .filter(Boolean)
-        .join("\n");
-    })
-    .join("\n\n---\n\n");
+        .join("\n"),
+    );
+  }
+
+  return { block: parts.join("\n\n---\n\n"), skippedCount, truncatedCount };
 }
 
 function buildRequirementsBlock(requirements: MatchRequirementInput[]): string {
@@ -101,9 +140,14 @@ async function callGroqForMatching(
   apiKey: string,
   requirements: MatchRequirementInput[],
   documents: MatchDocumentInput[],
-): Promise<AiMatchResponse> {
+): Promise<{ response: AiMatchResponse; truncationNote?: string }> {
   const client = createGroqClient(apiKey);
   const jsonSchema = JSON.stringify(z.toJSONSchema(aiMatchResponseSchema));
+
+  const { block: documentsBlock, skippedCount, truncatedCount } = buildDocumentsBlock(documents);
+  const budgetNoteParts: string[] = [];
+  if (truncatedCount > 0) budgetNoteParts.push(`تم اختصار محتوى ${truncatedCount} مستند`);
+  if (skippedCount > 0) budgetNoteParts.push(`تم تخطي ${skippedCount} مستند بالكامل`);
 
   const userContent = `فيما يلي قائمة المتطلبات (متطلبات ملف الدعوى):
 
@@ -113,7 +157,7 @@ ${buildRequirementsBlock(requirements)}
 
 وفيما يلي المستندات المرفوعة فعلياً من العميل:
 
-${buildDocumentsBlock(documents)}
+${documentsBlock}
 
 =====
 
@@ -125,7 +169,7 @@ ${buildDocumentsBlock(documents)}
     // Kept well below Groq's free-tier 8,000 TPM cap — Groq's rate limiter
     // reserves (prompt tokens + max_tokens) upfront, so an over-generous
     // ceiling here can trip the limit even when actual usage is far lower.
-    max_tokens: 4000,
+    max_tokens: 3000,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT.replace("{{JSON_SCHEMA}}", jsonSchema) },
@@ -141,7 +185,13 @@ ${buildDocumentsBlock(documents)}
   if (!validated.success) {
     throw new Error("فشل التحقق من صيغة استجابة الذكاء الاصطناعي");
   }
-  return validated.data;
+  return {
+    response: validated.data,
+    truncationNote:
+      budgetNoteParts.length > 0
+        ? `تم تشغيل المطابقة بالذكاء الاصطناعي، لكن ${budgetNoteParts.join(" و")} من المستندات بسبب محدودية حجم الطلب المسموح به على مستوى الحساب الحالي — راجعها يدوياً إن لزم.`
+        : undefined,
+  };
 }
 
 export async function matchDocumentsToRequirements(
@@ -179,8 +229,12 @@ export async function matchDocumentsToRequirements(
   }
 
   try {
-    const response = await callGroqForMatching(apiKey, requirements, documents);
-    return { response, mode: "AI" };
+    const { response, truncationNote } = await callGroqForMatching(
+      apiKey,
+      requirements,
+      documents,
+    );
+    return { response, mode: "AI", warning: truncationNote };
   } catch (err) {
     const message = err instanceof Error ? err.message : "خطأ غير معروف";
     return {

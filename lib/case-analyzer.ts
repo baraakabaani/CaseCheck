@@ -27,6 +27,14 @@ export interface CaseAnalysisOutcome {
 
 const MAX_DOC_CHARS_IN_PROMPT = 8000;
 const MAX_TOTAL_DOCS_IN_PROMPT = 25;
+// Groq's free "on_demand" tier caps requests at 8,000 tokens/minute
+// (prompt_tokens + max_tokens, reserved up front). The fixed system
+// prompt + JSON schema alone measures ~1,300 tokens; combined with the
+// max_tokens reserved for output below, this is what's left for every
+// document's content — real multi-document cases will still commonly
+// exceed a per-document cap, so this is a *total* budget shared across
+// all documents (see buildDocumentsBlock), not a per-document one.
+const TOTAL_DOCUMENT_CHARS_BUDGET = 8000; // ≈ 2,700 tokens at ~3 chars/token for Arabic-heavy text
 
 const SYSTEM_PROMPT = `أنت خبير حسابي قضائي متمرس تراجع ملف دعوى كاملاً عقب تكليفك بمأمورية خبرة من محكمة إماراتية، بهدف إعداد "ملخص التحليل الأولي" الذي يعتمده الخبير قبل الاجتماع الأول مع الأطراف.
 
@@ -60,23 +68,61 @@ function buildPartiesBlock(parties: CaseAnalyzerParty[]): string {
     .join("\n");
 }
 
-function buildDocumentsBlock(documents: CaseAnalyzerDocument[]): string {
-  return documents
-    .slice(0, MAX_TOTAL_DOCS_IN_PROMPT)
-    .map((d, i) => {
-      const excerpt = d.text?.trim()
-        ? d.text.slice(0, MAX_DOC_CHARS_IN_PROMPT)
-        : "(تعذر استخراج نص من هذا الملف)";
-      return [
+/** Renders as many documents as fit inside a shared, total character
+ * budget (not a flat per-document cap) so the request stays under Groq's
+ * free-tier TPM limit — earlier-uploaded documents (typically the ruling
+ * and statement of claim) get priority and the fullest excerpts; later
+ * ones get whatever budget remains, or are skipped with an honest note
+ * rather than silently omitted. */
+function buildDocumentsBlock(documents: CaseAnalyzerDocument[]): {
+  block: string;
+  skippedCount: number;
+  truncatedCount: number;
+} {
+  const included = documents.slice(0, MAX_TOTAL_DOCS_IN_PROMPT);
+  let remaining = TOTAL_DOCUMENT_CHARS_BUDGET;
+  let skippedCount = documents.length - included.length;
+  let truncatedCount = 0;
+
+  const parts: string[] = [];
+  for (const [i, d] of included.entries()) {
+    const fullText = d.text?.trim() || "";
+    if (!fullText) {
+      parts.push(
+        [
+          `[مستند ${i + 1}]`,
+          `documentId: ${d.id}`,
+          `اسم الملف: ${d.fileName}`,
+          `نوع الملف: ${d.fileKind}`,
+          `مقتطف من المحتوى:\n"""\n(تعذر استخراج نص من هذا الملف)\n"""`,
+        ].join("\n"),
+      );
+      continue;
+    }
+    if (remaining < 200) {
+      // Not enough budget left for a useful excerpt — skip rather than
+      // include a near-empty, misleading fragment.
+      skippedCount++;
+      continue;
+    }
+    const cap = Math.min(fullText.length, remaining, MAX_DOC_CHARS_IN_PROMPT);
+    const excerpt = fullText.slice(0, cap);
+    if (excerpt.length < fullText.length) truncatedCount++;
+    remaining -= excerpt.length;
+
+    parts.push(
+      [
         `[مستند ${i + 1}]`,
         `documentId: ${d.id}`,
         `اسم الملف: ${d.fileName}`,
         `نوع الملف: ${d.fileKind}`,
         `تواريخ مكتشفة: ${d.detectedDates.join("، ") || "لا يوجد"}`,
-        `مقتطف من المحتوى:\n"""\n${excerpt}\n"""`,
-      ].join("\n");
-    })
-    .join("\n\n---\n\n");
+        `مقتطف من المحتوى${excerpt.length < fullText.length ? " (مُختصر لضيق المساحة)" : ""}:\n"""\n${excerpt}\n"""`,
+      ].join("\n"),
+    );
+  }
+
+  return { block: parts.join("\n\n---\n\n"), skippedCount, truncatedCount };
 }
 
 function extractJson(raw: string): unknown {
@@ -98,13 +144,22 @@ async function callGroqForAnalysis(
   caseCtx: CaseAnalyzerContext,
   parties: CaseAnalyzerParty[],
   documents: CaseAnalyzerDocument[],
-): Promise<CaseAnalysisResult> {
+): Promise<{ result: CaseAnalysisResult; truncationNote?: string }> {
   const client = createGroqClient(apiKey);
   const jsonSchema = JSON.stringify(z.toJSONSchema(caseAnalysisResultSchema));
 
   const mandateNatureLabels = caseCtx.mandateNature
     .map((n) => MANDATE_NATURE_LABELS[n])
     .join("، ");
+
+  const { block: documentsBlock, skippedCount, truncatedCount } = buildDocumentsBlock(documents);
+  const budgetNoteParts: string[] = [];
+  if (truncatedCount > 0) budgetNoteParts.push(`تم اختصار محتوى ${truncatedCount} مستند`);
+  if (skippedCount > 0) budgetNoteParts.push(`تم تخطي ${skippedCount} مستند بالكامل`);
+  const budgetNote =
+    budgetNoteParts.length > 0
+      ? `\n\nملاحظة: بسبب محدودية حجم الطلب المسموح به، ${budgetNoteParts.join(" و")} من المستندات المرفوعة — لم تُعرض هذه الأجزاء على الذكاء الاصطناعي، فقد يكون التحليل أدناه غير مكتمل بخصوصها.`
+      : "";
 
   const userContent = `بيانات الدعوى:
 - رقم الدعوى: ${caseCtx.caseNumber}
@@ -120,7 +175,7 @@ ${buildPartiesBlock(parties)}
 
 المستندات المرفوعة (العدد الكلي: ${documents.length}):
 
-${buildDocumentsBlock(documents)}
+${documentsBlock}
 
 =====
 
@@ -132,9 +187,9 @@ ${buildDocumentsBlock(documents)}
     // Kept well below Groq's free-tier 8,000 TPM cap — Groq's rate limiter
     // reserves (prompt tokens + max_tokens) upfront, so an over-generous
     // ceiling here can trip the limit even when actual usage is far lower.
-    // Large real case files (many/long documents) can still exceed the
-    // free tier regardless of this — see the README note on Groq tiers.
-    max_tokens: 4000,
+    // buildDocumentsBlock's total character budget is what keeps the
+    // prompt itself under the cap for real multi-document cases.
+    max_tokens: 2500,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT.replace("{{JSON_SCHEMA}}", jsonSchema) },
@@ -150,7 +205,12 @@ ${buildDocumentsBlock(documents)}
   if (!validated.success) {
     throw new Error("فشل التحقق من صيغة استجابة الذكاء الاصطناعي");
   }
-  return validated.data;
+  return {
+    result: validated.data,
+    truncationNote: budgetNote
+      ? `تم إعداد التحليل بالذكاء الاصطناعي، لكن ${budgetNoteParts.join(" و")} من المستندات بسبب محدودية حجم الطلب المسموح به على مستوى الحساب الحالي — راجعها يدوياً إن لزم.`
+      : undefined,
+  };
 }
 
 export async function analyzeCaseFile(
@@ -166,8 +226,13 @@ export async function analyzeCaseFile(
   }
 
   try {
-    const result = await callGroqForAnalysis(apiKey, caseCtx, parties, documents);
-    return { result, mode: "AI" };
+    const { result, truncationNote } = await callGroqForAnalysis(
+      apiKey,
+      caseCtx,
+      parties,
+      documents,
+    );
+    return { result, mode: "AI", warning: truncationNote };
   } catch (err) {
     const message = err instanceof Error ? err.message : "خطأ غير معروف";
     return {

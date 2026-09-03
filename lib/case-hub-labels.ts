@@ -7,6 +7,7 @@ import type {
   MeetingAttendeeRole,
   NoticeDeliveryStatus,
 } from "./hub-schemas";
+import type { CaseReadinessStatus } from "./schemas";
 
 export const MEETING_ATTENDEE_ROLE_LABELS: Record<MeetingAttendeeRole, string> = {
   CLAIMANT: "مدعٍ",
@@ -51,4 +52,9 @@ export const DOCUMENT_DEMAND_STATUS_LABELS: Record<DocumentDemandStatus, string>
 export const NOTICE_DELIVERY_STATUS_LABELS: Record<NoticeDeliveryStatus, string> = {
   SENT: "تم الإرسال",
   ACKNOWLEDGED: "تم الاستلام",
+};
+
+export const CASE_READINESS_STATUS_LABELS: Record<CaseReadinessStatus, string> = {
+  NEEDS_MORE_WORK: "يلزم إجراءات إضافية",
+  READY_FOR_STUDY: "الملف جاهز للدراسة",
 };

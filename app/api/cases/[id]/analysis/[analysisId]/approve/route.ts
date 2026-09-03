@@ -36,6 +36,7 @@ export async function POST(_req: NextRequest, { params }: RouteParams) {
         description: m.reason,
         status: "MISSING",
         aiNotes: m.reason,
+        relatedTask: m.relatedTask ?? null,
         order: index,
       })),
     }),

@@ -104,6 +104,29 @@ export const siteInspectionInputSchema = z.object({
 });
 export type SiteInspectionInput = z.infer<typeof siteInspectionInputSchema>;
 
+export const updateSiteInspectionSchema = z.object({
+  equipmentReviewed: z.string().optional().nullable(),
+  booksReviewed: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  attachmentDocumentIds: z.array(z.string()).optional(),
+  visitReportDraft: z.string().optional().nullable(),
+});
+export type UpdateSiteInspectionInput = z.infer<typeof updateSiteInspectionSchema>;
+
+export const siteInspectionTestimonyInputSchema = z.object({
+  personName: z.string().min(1, "اسم صاحب الإفادة مطلوب"),
+  personRole: z.string().optional().nullable(),
+  statementText: z.string().min(1, "نص الإفادة مطلوب"),
+});
+export type SiteInspectionTestimonyInput = z.infer<typeof siteInspectionTestimonyInputSchema>;
+
+export const updateSiteInspectionTestimonySchema = z.object({
+  personName: z.string().min(1).optional(),
+  personRole: z.string().optional().nullable(),
+  statementText: z.string().min(1).optional(),
+});
+export type UpdateSiteInspectionTestimonyInput = z.infer<typeof updateSiteInspectionTestimonySchema>;
+
 export const DOCUMENT_DEMAND_STATUSES = ["PENDING", "PARTIALLY_RECEIVED", "RECEIVED"] as const;
 export type DocumentDemandStatus = (typeof DOCUMENT_DEMAND_STATUSES)[number];
 
@@ -112,6 +135,7 @@ export const documentDemandInputSchema = z.object({
   item: z.string().min(1, "اسم المستند المطلوب"),
   requestedFromPartyIds: z.array(z.string()).default([]),
   deadline: z.string().datetime({ message: "الموعد النهائي مطلوب" }),
+  relatedTask: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 export type DocumentDemandInput = z.infer<typeof documentDemandInputSchema>;
@@ -121,6 +145,7 @@ export const updateDocumentDemandSchema = z.object({
   requestedFromPartyIds: z.array(z.string()).optional(),
   deadline: z.string().datetime().optional(),
   status: z.enum(DOCUMENT_DEMAND_STATUSES).optional(),
+  relatedTask: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 export type UpdateDocumentDemandInput = z.infer<typeof updateDocumentDemandSchema>;

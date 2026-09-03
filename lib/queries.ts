@@ -19,7 +19,10 @@ export function getCaseDetail(id: string) {
       meetingAttendees: { orderBy: { order: "asc" }, include: { document: true } },
       hearingSessions: { orderBy: { createdAt: "asc" } },
       documentDemands: { orderBy: { deadline: "asc" } },
-      siteInspections: { orderBy: { visitDate: "desc" } },
+      siteInspections: {
+        orderBy: { visitDate: "desc" },
+        include: { testimonies: { orderBy: { order: "asc" } } },
+      },
       courtReport: true,
     },
   });

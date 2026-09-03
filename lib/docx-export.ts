@@ -165,20 +165,21 @@ export async function buildCourtReportDocxBlob({
   return Packer.toBlob(doc);
 }
 
-export interface HearingMinutesDocxInput {
-  caseNumber: string;
-  label: string;
-  minutesText: string;
-}
-
-/** موديول 2 — تصدير مسودة محضر الجلسة (المجمَّعة آلياً في
- * lib/hearing-minutes.ts) بترويسة Parker Russell، مع مكان توقيع الخبير. */
-export async function buildHearingMinutesDocxBlob({
-  caseNumber,
-  label,
-  minutesText,
-}: HearingMinutesDocxInput): Promise<Blob> {
-  const bodyParagraphs = minutesText.split("\n").map(
+/** Shared shape behind every "compiled from structured data" export
+ * (hearing minutes, site-visit reports, ...): branded header, a bold
+ * title line, the body split into paragraphs, and an optional signature
+ * line — reused instead of re-duplicating the same docx assembly a third
+ * time. */
+async function buildBrandedTextReportDocxBlob({
+  title,
+  bodyText,
+  signatureLabel,
+}: {
+  title: string;
+  bodyText: string;
+  signatureLabel?: string;
+}): Promise<Blob> {
+  const bodyParagraphs = bodyText.split("\n").map(
     (line) =>
       new Paragraph({
         bidirectional: true,
@@ -197,29 +198,67 @@ export async function buildHearingMinutesDocxBlob({
             bidirectional: true,
             alignment: AlignmentType.RIGHT,
             spacing: { after: 300 },
-            children: [
-              new TextRun({
-                text: `محضر ${label} — الدعوى رقم ${caseNumber}`,
-                bold: true,
-                size: 28,
-                rightToLeft: true,
-                font: "Arial",
-              }),
-            ],
+            children: [new TextRun({ text: title, bold: true, size: 28, rightToLeft: true, font: "Arial" })],
           }),
           ...bodyParagraphs,
-          new Paragraph({
-            bidirectional: true,
-            alignment: AlignmentType.RIGHT,
-            spacing: { before: 500 },
-            children: [new TextRun({ text: "توقيع الخبير الحسابي:", bold: true, rightToLeft: true, font: "Arial" })],
-          }),
+          ...(signatureLabel
+            ? [
+                new Paragraph({
+                  bidirectional: true,
+                  alignment: AlignmentType.RIGHT,
+                  spacing: { before: 500 },
+                  children: [
+                    new TextRun({ text: signatureLabel, bold: true, rightToLeft: true, font: "Arial" }),
+                  ],
+                }),
+              ]
+            : []),
         ],
       },
     ],
   });
 
   return Packer.toBlob(doc);
+}
+
+export interface HearingMinutesDocxInput {
+  caseNumber: string;
+  label: string;
+  minutesText: string;
+}
+
+/** موديول 2 — تصدير مسودة محضر الجلسة (المجمَّعة آلياً في
+ * lib/hearing-minutes.ts) بترويسة Parker Russell، مع مكان توقيع الخبير. */
+export function buildHearingMinutesDocxBlob({
+  caseNumber,
+  label,
+  minutesText,
+}: HearingMinutesDocxInput): Promise<Blob> {
+  return buildBrandedTextReportDocxBlob({
+    title: `محضر ${label} — الدعوى رقم ${caseNumber}`,
+    bodyText: minutesText,
+    signatureLabel: "توقيع الخبير الحسابي:",
+  });
+}
+
+export interface SiteInspectionReportDocxInput {
+  caseNumber: string;
+  visitDate: string;
+  reportText: string;
+}
+
+/** موديول 3 — تصدير مسودة محضر الانتقال والمعاينة (المجمَّعة آلياً في
+ * lib/site-inspection-report.ts) بترويسة Parker Russell. */
+export function buildSiteInspectionReportDocxBlob({
+  caseNumber,
+  visitDate,
+  reportText,
+}: SiteInspectionReportDocxInput): Promise<Blob> {
+  return buildBrandedTextReportDocxBlob({
+    title: `محضر انتقال ومعاينة — الدعوى رقم ${caseNumber} — ${visitDate}`,
+    bodyText: reportText,
+    signatureLabel: "توقيع الخبير الحسابي:",
+  });
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {

@@ -74,6 +74,10 @@ export const DOC_CATEGORIES = [
 ] as const;
 export type DocCategory = (typeof DOC_CATEGORIES)[number];
 
+// الموديول 3 — علامة جاهزية الملف للدراسة
+export const CASE_READINESS_STATUSES = ["NEEDS_MORE_WORK", "READY_FOR_STUDY"] as const;
+export type CaseReadinessStatus = (typeof CASE_READINESS_STATUSES)[number];
+
 // ---------------------------------------------------------------------------
 // Case intake — 4-phase judicial-expertise wizard
 // ---------------------------------------------------------------------------
@@ -122,6 +126,7 @@ export const updateCaseSchema = caseIntakeStep1Schema
     status: z.enum(CASE_STATUSES).optional(),
     caseType: z.enum(CASE_TYPES).optional(),
     intakeStatus: z.enum(INTAKE_STATUSES).optional(),
+    readinessStatus: z.enum(CASE_READINESS_STATUSES).optional(),
   });
 export type UpdateCaseInput = z.infer<typeof updateCaseSchema>;
 

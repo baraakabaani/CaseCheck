@@ -41,6 +41,9 @@ model Case {
   // تتبّع تقدّم المعالج (wizard) حتى يمكن استئناف ملف لم يُستكمل فتحه
   intakeStatus String @default("DRAFT_PHASE_1") // DRAFT_PHASE_1..4 | ACTIVE
 
+  // الموديول 3 — علامة جاهزية الملف للدراسة، تُبدَّل يدوياً بمعرفة الخبير
+  readinessStatus String @default("NEEDS_MORE_WORK") // NEEDS_MORE_WORK | READY_FOR_STUDY
+
   // مراسلة المتعامل (خطاب "استكمال المستندات" — منفصل عن وكلاء الأطراف في الإخطار)
   clientName  String? // اسم المتعامل (من نتلقى منه المستندات)
   clientEmail String? // البريد الإلكتروني للمتعامل
@@ -101,6 +104,7 @@ model Requirement {
   aiConfidence   Float?
   manualOverride Boolean @default(false) // true إذا عدّل المستخدم الحالة يدوياً
   overrideNotes  String?
+  relatedTask    String? // المهمة المرتبطة به من مأمورية الخبرة (من التحليل الأولي، الموديول 1)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -372,6 +376,7 @@ model DocumentDemand {
   deadline              DateTime
   status                String   @default("PENDING") // PENDING | PARTIALLY_RECEIVED | RECEIVED
   notes                 String?
+  relatedTask           String? // المهمة المرتبطة به من مأمورية الخبرة، يُختار يدوياً عند الإنشاء
 
   createdAt DateTime @default(now())
 
@@ -409,11 +414,34 @@ model SiteInspection {
   location  String
   purpose   String
   attendees String? // JSON string[]
-  notes     String?
+
+  equipmentReviewed     String? // الأجهزة/الخوادم التي تم فحصها
+  booksReviewed         String? // الدفاتر المالية التي روجعت
+  notes                 String? // ملاحظات عامة أخرى
+  attachmentDocumentIds String? // JSON string[] — صور/مستندات مرفقة (Document.id)
+  visitReportDraft      String? // مسودة محضر الانتقال والمعاينة (مركّبة آلياً)
 
   createdAt DateTime @default(now())
 
+  testimonies SiteInspectionTestimony[]
+
   @@index([caseId])
+}
+
+// ---------------------------------------------------------------------------
+// الموديول 3 — إفادات ميدانية مسجَّلة أثناء زيارة معاينة.
+// ---------------------------------------------------------------------------
+model SiteInspectionTestimony {
+  id               String         @id @default(cuid())
+  siteInspectionId String
+  siteInspection   SiteInspection @relation(fields: [siteInspectionId], references: [id], onDelete: Cascade)
+
+  personName    String
+  personRole    String? // مثال: موظف مالي، مدير الفرع
+  statementText String
+  order         Int     @default(0)
+
+  @@index([siteInspectionId])
 }
 
 // ---------------------------------------------------------------------------

@@ -179,21 +179,44 @@ milestone cards, each linking into its own module page:
    into a `.docx` محضر with the Parker Russell header
    (`buildHearingMinutesDocxBlob`) — not a second AI call, for the same
    reliability reason the إخطار template is deterministic.
-3. **الموديول 3 — المتابعة والمعاينة الميدانية** (`/cases/[id]/module-3`) —
-   a status board grouping the checklist by status, and a site-inspection
-   log (`SiteInspection`: visit date/location/purpose/attendees/notes).
+3. **الموديول 3 — المتابعة والمعاينة الميدانية** (`/cases/[id]/module-3`,
+   `components/Module3Hub.tsx`) — also taken to full depth: a unified
+   4-column board (مطلوبة / مستلمة جزئياً / **تخلف عن التقديم** / مكتملة
+   ومطابقة) merging both `Requirement` rows (from the Phase-4 checklist)
+   and `DocumentDemand` rows (raised in a Module 2 hearing room, or
+   directly here via a quick-add form) into one tracker, with a combined
+   progress bar and an overdue column derived from each demand's own
+   deadline. Every card has an inline click-to-move status control
+   (no drag-and-drop dependency — same PATCH endpoints either way) and
+   shows its `relatedTask` tag when linked to one of the case's own
+   AI-generated `mandateTasks`; the Phase-4 analysis's
+   `missingDocuments[].relatedTask` output now actually persists onto
+   `Requirement` rows (previously silently dropped by the approve route).
+   A manual "الملف جاهز للدراسة" flag (`Case.readinessStatus`) surfaces on
+   the Case Hub badge, taking priority over the auto-computed status when
+   set. An overdue-reminder card generates a تذكير letter for every
+   past-deadline demand by feeding them into the **same unmodified**
+   `generateEmailDraft()` used for Module 1's client letters — no new AI
+   code, just a different input shape. The site-inspection log
+   (`SiteInspection`) now captures structured fields (equipment/servers
+   reviewed, financial books reviewed), attachable documents, and
+   structured on-site testimonies (`SiteInspectionTestimony`), and a
+   "توليد محضر انتقال ومعاينة" button deterministically compiles all of it
+   into a محضر (`lib/site-inspection-report.ts`, string-built like the
+   إخطار and hearing-minutes templates — not a second AI call), exportable
+   to a Parker Russell–branded `.docx` (`buildSiteInspectionReportDocxBlob`).
 4. **الموديول 4 — صياغة التقرير القضائي** (`/cases/[id]/module-4`) — a
    5-tab report draft (`CourtReport`: المقدمة والمأمورية | الأطراف
    والإجراءات | البحث والدراسة | الخلاصة وتصفية الحساب | حافظة
    المستندات), autosaved, exportable to a Parker Russell–branded `.docx`
    (`lib/docx-export.ts`'s `buildCourtReportDocxBlob`).
 
-Modules 3 and 4 are still a deliberate **first pass**: real Prisma models
-and a genuinely working page each, but not yet a drag-and-drop Kanban
-board or Module 4's AI-aggregated per-task forensic sections with
-color-coded provenance — each is its own follow-up build. Module 2 was
-taken to full depth per a later request (see above). Modules 2–4 stay
-locked (dimmed, non-clickable) until Module 1 is complete.
+Module 4 is still a deliberate **first pass**: a real Prisma model and a
+genuinely working page, but not yet the AI-aggregated per-task forensic
+sections with color-coded provenance described in the original spec —
+its own follow-up build. Modules 2 and 3 were both taken to full depth
+per later requests (see above). Modules 2–4 stay locked (dimmed,
+non-clickable) until Module 1 is complete.
 
 State stays server-authoritative throughout (Prisma/SQLite via
 `lib/queries.ts`'s `getCaseDetail`, `router.refresh()` after any mutation —
@@ -209,7 +232,8 @@ app/                    RTL App Router pages + API routes
   cases/[id]            Case Hub — 4 milestone module cards
   cases/[id]/module-1/   Checklist, documents, email, analysis review
   cases/[id]/module-2/   Meeting readiness, scheduler, attendees, notices
-  cases/[id]/module-3/   Status board + site-inspection log
+  cases/[id]/module-3/   Unified document-tracking board + site-inspection
+                         reports
   cases/[id]/module-4/   Court report draft studio
   cases/[id]/notices/    Expert-meeting notice (إخطار) creation + view
   api/cases/...          REST endpoints backing all of the above

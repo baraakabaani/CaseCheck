@@ -66,6 +66,10 @@ export function CaseHub({ caseDetail }: { caseDetail: CaseDetail }) {
     (r) => r.status === "PROVIDED",
   ).length;
   const module3Complete = requirementsTotal > 0 && requirementsProvided === requirementsTotal;
+  const readyForStudy = caseDetail.readinessStatus === "READY_FOR_STUDY";
+  const overdueDemandsCount = caseDetail.documentDemands.filter(
+    (d) => d.status !== "RECEIVED" && new Date(d.deadline) < new Date(),
+  ).length;
 
   const reportStatus = (caseDetail.courtReport?.status ?? null) as CourtReportStatus | null;
   const reportHasContent = Boolean(
@@ -112,10 +116,14 @@ export function CaseHub({ caseDetail }: { caseDetail: CaseDetail }) {
       locked: !laterModulesUnlocked,
       badgeLabel: !laterModulesUnlocked
         ? "بانتظار الموديول 1"
-        : module3Complete
-          ? "المستندات مكتملة"
-          : "جاري الاستيفاء",
-      badgeTone: module3Complete ? "complete" : "progress",
+        : readyForStudy
+          ? "الملف جاهز للدراسة"
+          : overdueDemandsCount > 0
+            ? `${overdueDemandsCount} بند متأخر`
+            : module3Complete
+              ? "المستندات مكتملة"
+              : "جاري الاستيفاء",
+      badgeTone: readyForStudy || module3Complete ? "complete" : "progress",
     },
     {
       key: "module-4",

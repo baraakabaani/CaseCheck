@@ -83,6 +83,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     clientKeys,
   );
 
+  // ترتيب الأسئلة المُستخرَجة الجديدة يُلحَق بعد ما هو موجود فعلاً لكل طرف.
+  const nextOrder = { CLAIMANT: 0, RESPONDENT: 0 } as Record<"CLAIMANT" | "RESPONDENT", number>;
+  for (const q of session.questions) {
+    const role = q.partyRole as "CLAIMANT" | "RESPONDENT";
+    nextOrder[role] = Math.max(nextOrder[role], q.order + 1);
+  }
+
   await prisma.$transaction([
     prisma.hearingSession.update({
       where: { id: hearingId },
@@ -92,6 +99,21 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       prisma.hearingQuestion.update({
         where: { id: ma.questionId },
         data: { answerText: ma.answerExcerpt, status: "ANSWERED" },
+      }),
+    ),
+    // أسئلة وأجوبة ارتجالية استُخرجت من النص ولم تكن ضمن الأسئلة المُعدّة
+    // مسبقاً — تُضاف كصفوف جديدة بمصدر EXTRACTED.
+    ...outcome.extractedQuestions.map((eq) =>
+      prisma.hearingQuestion.create({
+        data: {
+          hearingSessionId: hearingId,
+          partyRole: eq.partyRole,
+          questionText: eq.questionText,
+          answerText: eq.answerText,
+          sourceType: "EXTRACTED",
+          status: "ANSWERED",
+          order: nextOrder[eq.partyRole]++,
+        },
       }),
     ),
   ]);
@@ -104,6 +126,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   return NextResponse.json({
     correctedTranscript: outcome.correctedTranscript,
     matchedAnswersCount: outcome.matchedAnswers.length,
+    extractedQuestionsCount: outcome.extractedQuestions.length,
     questions,
     mode: outcome.mode,
     warning: outcome.warning ?? null,

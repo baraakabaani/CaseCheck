@@ -437,6 +437,12 @@ function QuestionsCard({
               من التحليل الأولي
             </Badge>
           )}
+          {q.sourceType === "EXTRACTED" && (
+            <Badge variant="outline" className="gap-1 border-primary/30 bg-primary/10 text-xs text-primary">
+              <Sparkles className="size-3" />
+              مستخرج من نص التفريغ
+            </Badge>
+          )}
         </div>
       </div>
     );
@@ -539,7 +545,12 @@ function TranscriptCard({
       if (!res.ok) throw new Error(data.error || "فشل تصحيح النص");
       if (data.warning) toast.warning(data.warning);
       else if (data.mode === "OFFLINE") toast.success("تم حفظ النص (بدون تصحيح — لا يوجد مفتاح API)");
-      else toast.success(`تم تصحيح النص${data.matchedAnswersCount > 0 ? ` ومطابقة ${data.matchedAnswersCount} إجابة` : ""}`);
+      else {
+        const parts: string[] = [];
+        if (data.matchedAnswersCount > 0) parts.push(`مطابقة ${data.matchedAnswersCount} إجابة`);
+        if (data.extractedQuestionsCount > 0) parts.push(`استخراج ${data.extractedQuestionsCount} سؤال جديد`);
+        toast.success(`تم تصحيح النص${parts.length > 0 ? ` و${parts.join(" و")}` : ""}`);
+      }
       setText("");
       onChanged();
     } catch (err) {
@@ -558,7 +569,9 @@ function TranscriptCard({
         <p className="text-xs text-muted-foreground">
           ارفع نص تفريغ آلي للاجتماع (لصقاً أو كملف) — سيُصحَّح تلقائياً بالذكاء الاصطناعي
           بالاستعانة بسياق الدعوى (أسماء الأطراف، ملخص الدعوى)، وتُطابَق الإجابات الفعلية مع
-          الأسئلة المُعدّة أعلاه.
+          الأسئلة المُعدّة أعلاه، مع استخراج أي أسئلة وأجوبة ارتجالية أخرى وردت فعلياً في
+          النص ولم تكن ضمن الأسئلة المُعدّة مسبقاً — تُضاف تلقائياً كأسئلة جديدة (موسومة
+          «مستخرج من نص التفريغ» أعلاه).
         </p>
 
         <Textarea

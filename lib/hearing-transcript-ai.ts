@@ -37,6 +37,7 @@ export interface TranscriptCorrectionContext {
 export interface TranscriptCorrectionOutcome {
   correctedTranscript: string;
   matchedAnswers: { questionId: string; answerExcerpt: string }[];
+  extractedQuestions: { partyRole: "CLAIMANT" | "RESPONDENT"; questionText: string; answerText: string }[];
   mode: "AI" | "OFFLINE";
   warning?: string;
 }
@@ -46,14 +47,22 @@ const matchedAnswerSchema = z.object({
   answerExcerpt: z.string(),
 });
 
+const extractedQuestionSchema = z.object({
+  partyRole: z.enum(["CLAIMANT", "RESPONDENT"]),
+  questionText: z.string(),
+  answerText: z.string(),
+});
+
 const aiResultSchema = z.object({
   correctedTranscript: z.string(),
   matchedAnswers: z.array(matchedAnswerSchema).default([]),
+  extractedQuestions: z.array(extractedQuestionSchema).default([]),
 });
 
 const AI_JSON_SCHEMA = `{
   "correctedTranscript": "string",
-  "matchedAnswers": [{ "questionText": "string", "answerExcerpt": "string" }]
+  "matchedAnswers": [{ "questionText": "string", "answerExcerpt": "string" }],
+  "extractedQuestions": [{ "partyRole": "CLAIMANT | RESPONDENT", "questionText": "string", "answerText": "string" }]
 }`;
 
 const SYSTEM_PROMPT = `أنت مساعد قانوني متخصص في مراجعة محاضر جلسات الخبرة القضائية في دولة الإمارات العربية المتحدة.
@@ -63,8 +72,9 @@ const SYSTEM_PROMPT = `أنت مساعد قانوني متخصص في مراجع
 مهمتك:
 1. صحّح النص بالاستعانة بسياق الدعوى المعطى لك (أسماء الأطراف، رقم الدعوى، ملخص الدعوى، نص المأمورية) — استخدم هذه الأسماء والمصطلحات بالضبط كلما ظهر ما يشبهها بشكل مشوّه في التفريغ. لا تُغيّر المعنى ولا تحذف أي جزء من كلام المتحدثين، فقط صحّح الأخطاء الإملائية/الصوتية الواضحة ونظّم علامات الترقيم.
 2. من النص المصحَّح، حدد أي إجابات فعلية أعطاها أحد الأطراف على الأسئلة المُعدّة مسبقاً للاجتماع (معطاة لك أدناه) — أرجعها في matchedAnswers: لكل سؤال وجدت له إجابة واضحة في النص، questionText (انسخ نص السؤال كما ورد لك بالضبط دون تعديل) وanswerExcerpt (مقتطف من إجابة المتحدث الفعلية كما وردت، وليس إعادة صياغة).
+3. بعد ذلك، افحص باقي النص عن أي تبادل سؤال-وجواب فعلي آخر جرى في الاجتماع ولم يكن ضمن الأسئلة المُعدّة مسبقاً (سؤال ارتجالي طرحه الخبير أو أحد الوكلاء، مع إجابة أحد الأطراف عليه) — أرجعها في extractedQuestions: partyRole (الطرف الذي أجاب)، questionText (نص السؤال كما ورد أو بأقرب صياغة ممكنة)، answerText (نص الإجابة الفعلية). لا تُدرج في extractedQuestions أي سؤال سبق إدراجه في matchedAnswers.
 
-لا تخترع أي كلام أو إجابة غير موجودة فعلياً في النص. إن كان جزء من النص غير مفهوم تماماً، أبقه كما هو مع علامة [غير واضح] بدل تخمين محتواه. أجب بالعربية الفصحى. يجب أن يكون ردك بصيغة JSON صالحة فقط، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown، مطابقاً تماماً للمخطط التالي:
+لا تخترع أي كلام أو سؤال أو إجابة غير موجودة فعلياً في النص. إن كان جزء من النص غير مفهوم تماماً، أبقه كما هو مع علامة [غير واضح] بدل تخمين محتواه. أجب بالعربية الفصحى. يجب أن يكون ردك بصيغة JSON صالحة فقط، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown، مطابقاً تماماً للمخطط التالي:
 ${AI_JSON_SCHEMA}`;
 
 function extractJson(raw: string): unknown {
@@ -149,9 +159,11 @@ ${transcriptExcerpt}
   const completion = await client.chat.completions.create({
     model: resolved.model,
     temperature: 0.2,
-    // Correction output can be as long as the (budgeted) input transcript —
-    // needs real headroom, unlike the compact-JSON outputs elsewhere.
-    max_tokens: 4500,
+    // Correction output can be as long as the (budgeted) input transcript,
+    // plus now an extractedQuestions array for unplanned Q&A found in the
+    // transcript — needs real headroom, unlike the compact-JSON outputs
+    // elsewhere.
+    max_tokens: 5500,
     reasoning_effort: resolved.provider === "gemini" ? "low" : undefined,
     response_format: { type: "json_object" },
     messages: [
@@ -180,6 +192,7 @@ ${transcriptExcerpt}
     outcome: {
       correctedTranscript: validated.data.correctedTranscript,
       matchedAnswers,
+      extractedQuestions: validated.data.extractedQuestions,
       mode: "AI",
     },
     truncationNote: truncated
@@ -199,9 +212,10 @@ export async function correctHearingTranscript(
     return {
       correctedTranscript: rawText,
       matchedAnswers: [],
+      extractedQuestions: [],
       mode: "OFFLINE",
       warning:
-        "تعذّر تفعيل تصحيح النص بالذكاء الاصطناعي (لا يوجد مفتاح API مُهيأ) — تم حفظ النص كما رُفع دون تعديل. أضف مفتاحاً من زر «مفتاح الذكاء الاصطناعي» أعلى الصفحة ثم أعد الرفع للحصول على نص مصحَّح ومطابقة الإجابات تلقائياً.",
+        "تعذّر تفعيل تصحيح النص بالذكاء الاصطناعي (لا يوجد مفتاح API مُهيأ) — تم حفظ النص كما رُفع دون تعديل. أضف مفتاحاً من زر «مفتاح الذكاء الاصطناعي» أعلى الصفحة ثم أعد الرفع للحصول على نص مصحَّح ومطابقة/استخراج الأسئلة والأجوبة تلقائياً.",
     };
   }
 
@@ -213,6 +227,7 @@ export async function correctHearingTranscript(
     return {
       correctedTranscript: rawText,
       matchedAnswers: [],
+      extractedQuestions: [],
       mode: "OFFLINE",
       warning: `تعذر استخدام الذكاء الاصطناعي (${message})، تم حفظ النص كما رُفع دون تعديل.`,
     };

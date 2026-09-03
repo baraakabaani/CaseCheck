@@ -165,6 +165,63 @@ export async function buildCourtReportDocxBlob({
   return Packer.toBlob(doc);
 }
 
+export interface HearingMinutesDocxInput {
+  caseNumber: string;
+  label: string;
+  minutesText: string;
+}
+
+/** موديول 2 — تصدير مسودة محضر الجلسة (المجمَّعة آلياً في
+ * lib/hearing-minutes.ts) بترويسة Parker Russell، مع مكان توقيع الخبير. */
+export async function buildHearingMinutesDocxBlob({
+  caseNumber,
+  label,
+  minutesText,
+}: HearingMinutesDocxInput): Promise<Blob> {
+  const bodyParagraphs = minutesText.split("\n").map(
+    (line) =>
+      new Paragraph({
+        bidirectional: true,
+        alignment: AlignmentType.RIGHT,
+        spacing: { after: 140 },
+        children: [new TextRun({ text: line || " ", rightToLeft: true, font: "Arial" })],
+      }),
+  );
+
+  const doc = new Document({
+    sections: [
+      {
+        children: [
+          ...(await buildBrandedDocxHeader()),
+          new Paragraph({
+            bidirectional: true,
+            alignment: AlignmentType.RIGHT,
+            spacing: { after: 300 },
+            children: [
+              new TextRun({
+                text: `محضر ${label} — الدعوى رقم ${caseNumber}`,
+                bold: true,
+                size: 28,
+                rightToLeft: true,
+                font: "Arial",
+              }),
+            ],
+          }),
+          ...bodyParagraphs,
+          new Paragraph({
+            bidirectional: true,
+            alignment: AlignmentType.RIGHT,
+            spacing: { before: 500 },
+            children: [new TextRun({ text: "توقيع الخبير الحسابي:", bold: true, rightToLeft: true, font: "Arial" })],
+          }),
+        ],
+      },
+    ],
+  });
+
+  return Packer.toBlob(doc);
+}
+
 export function downloadBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

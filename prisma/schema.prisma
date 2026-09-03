@@ -56,7 +56,8 @@ model Case {
   notices          Notice[]
   analyses         CaseAnalysis[]
   meetingAttendees MeetingAttendee[]
-  hearingSession   HearingSession?
+  hearingSessions  HearingSession[]
+  documentDemands  DocumentDemand[]
   siteInspections  SiteInspection[]
   courtReport      CourtReport?
 }
@@ -136,7 +137,8 @@ model Document {
   submittedByPartyId String?
   submittedByParty   CaseParty? @relation(fields: [submittedByPartyId], references: [id], onDelete: SetNull)
 
-  matches RequirementMatch[]
+  matches         RequirementMatch[]
+  poaForAttendees MeetingAttendee[] // مرفق كمستند توكيل (POA) لحاضر ما، إن وُجد
 
   @@index([caseId])
   @@index([submittedByPartyId])
@@ -214,6 +216,8 @@ model Notice {
 
   createdAt DateTime @default(now())
 
+  deliveries NoticeDelivery[]
+
   @@index([caseId])
 }
 
@@ -251,7 +255,8 @@ model CaseAnalysis {
 
 // ---------------------------------------------------------------------------
 // الموديول 2 — إدارة الاجتماع والتواصل: سجل الحضور/الوكلاء عن كل طرف
-// (POA) لاجتماع الخبرة الأول.
+// (POA) — سجل واحد للدعوى يمتد عبر كل اجتماعاتها (انظر
+// HearingAttendanceRecord للحضور الفعلي لكل اجتماع على حدة).
 // ---------------------------------------------------------------------------
 model MeetingAttendee {
   id     String @id @default(cuid())
@@ -261,30 +266,135 @@ model MeetingAttendee {
   name              String
   role              String // CLAIMANT | RESPONDENT | POA | EXPERT | OTHER
   representingParty String? // اسم الطرف الذي يمثله الوكيل، إن وُجد
-  attendanceStatus  String  @default("PENDING") // PENDING | PRESENT | LATE | ABSENT
+  attendanceStatus  String  @default("PENDING") // PENDING | PRESENT | LATE | ABSENT — الحالة المتوقعة قبل الاجتماع
   order             Int     @default(0)
 
+  documentId String? // مستند التوكيل (POA) المرفوع، إن وُجد
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
+
+  attendanceRecords HearingAttendanceRecord[]
+  noticeDeliveries  NoticeDelivery[]
+
+  @@index([caseId])
+  @@index([documentId])
+}
+
+// ---------------------------------------------------------------------------
+// الموديول 2 — اجتماعات الخبرة (قائمة لكل دعوى — قد تُعقد أكثر من مرة).
+// كل اجتماع له "غرفة إدارة" حية: حالة/توقيتات فعلية، محضر مركّب من بيانات
+// منظّمة (حضور + كلمة افتتاحية + أسئلة وأجوبة + مطالبات مستندات)، ونص
+// تفريغ يُصحَّح بالذكاء الاصطناعي.
+// ---------------------------------------------------------------------------
+model HearingSession {
+  id     String @id @default(cuid())
+  caseId String
+  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  label           String    @default("الاجتماع الأول") // تمييز بين اجتماعات الدعوى المتعددة
+  status          String    @default("NOT_SCHEDULED") // NOT_SCHEDULED | SCHEDULED | IN_PROGRESS | COMPLETED
+  meetingDate     DateTime?
+  meetingTime     String? // نص حر، مثال: "12:30 ظهراً" — يطابق شكل Notice.meetingTimeLabel
+  meetingMethod   String? // مثال: تقنية الاتصال المرئي بواسطة ZOOM، أو حضوري
+  meetingLink     String?
+  meetingId       String?
+  meetingPasscode String?
+  openingNotes    String? // ملاحظات/نص افتتاحي حر (الكلمة الافتتاحية القضائية)
+
+  startedAt DateTime? // بدء الاجتماع فعلياً
+  endedAt   DateTime? // انتهاء الاجتماع فعلياً
+
+  rawTranscript       String? // نص تفريغ الاجتماع كما رُفع
+  correctedTranscript String? // بعد تصحيحه بالذكاء الاصطناعي بالاستعانة بسياق الدعوى
+  minutesDraft        String? // مسودة محضر الجلسة النهائية (مركّبة آلياً من البيانات المنظمة، قابلة للتعديل اليدوي)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  questions         HearingQuestion[]
+  attendanceRecords HearingAttendanceRecord[]
+  documentDemands   DocumentDemand[]
 
   @@index([caseId])
 }
 
 // ---------------------------------------------------------------------------
-// الموديول 2 — حالة الاجتماع الأول (نسخة مبسّطة v1: اجتماع واحد لكل دعوى؛
-// "غرفة إدارة الاجتماع" الحية بالتفصيل الكامل تطوير لاحق).
+// الموديول 2 — سجل الأسئلة والأجوبة لكل اجتماع (مبدئياً من أسئلة التحليل
+// الأولي المُولّدة بالذكاء الاصطناعي في الموديول 1، وقابلة للإضافة يدوياً).
 // ---------------------------------------------------------------------------
-model HearingSession {
-  id     String @id @default(cuid())
-  caseId String @unique
-  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+model HearingQuestion {
+  id               String         @id @default(cuid())
+  hearingSessionId String
+  hearingSession   HearingSession @relation(fields: [hearingSessionId], references: [id], onDelete: Cascade)
 
-  status       String    @default("NOT_SCHEDULED") // NOT_SCHEDULED | SCHEDULED | IN_PROGRESS | COMPLETED
-  meetingDate  DateTime?
-  openingNotes String? // ملاحظات/نص افتتاحي حر
-  minutesDraft String? // مسودة محضر الجلسة (نص حر v1)
+  partyRole    String // CLAIMANT | RESPONDENT
+  questionText String
+  sourceType   String  @default("MANUAL") // GENERATED | MANUAL
+  answerText   String?
+  status       String  @default("PENDING") // PENDING | ANSWERED | DEFERRED | REFUSED
+  order        Int     @default(0)
+
+  @@index([hearingSessionId])
+}
+
+// ---------------------------------------------------------------------------
+// الموديول 2 — الحضور الفعلي (roll call) لكل اجتماع على حدة — منفصل عن
+// MeetingAttendee.attendanceStatus الذي يمثل الحالة المتوقعة قبل الاجتماع.
+// ---------------------------------------------------------------------------
+model HearingAttendanceRecord {
+  id               String          @id @default(cuid())
+  hearingSessionId String
+  hearingSession   HearingSession  @relation(fields: [hearingSessionId], references: [id], onDelete: Cascade)
+  attendeeId       String
+  attendee         MeetingAttendee @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
+
+  status   String    @default("PENDING") // PENDING | PRESENT | LATE | ABSENT
+  markedAt DateTime?
+
+  @@unique([hearingSessionId, attendeeId])
+  @@index([hearingSessionId])
+}
+
+// ---------------------------------------------------------------------------
+// الموديول 2/3 — مطالبات المستندات الناتجة عن اجتماع (تُعرض أيضاً في
+// الموديول 3 لمتابعة الاستيفاء).
+// ---------------------------------------------------------------------------
+model DocumentDemand {
+  id               String          @id @default(cuid())
+  caseId           String
+  case             Case            @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  hearingSessionId String?
+  hearingSession   HearingSession? @relation(fields: [hearingSessionId], references: [id], onDelete: SetNull)
+
+  item                  String
+  requestedFromPartyIds String // JSON string[]
+  deadline              DateTime
+  status                String   @default("PENDING") // PENDING | PARTIALLY_RECEIVED | RECEIVED
+  notes                 String?
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+
+  @@index([caseId])
+  @@index([hearingSessionId])
+}
+
+// ---------------------------------------------------------------------------
+// الموديول 2 — تتبّع تسليم الإخطارات الرسمية لكل حاضر/وكيل.
+// ---------------------------------------------------------------------------
+model NoticeDelivery {
+  id         String          @id @default(cuid())
+  noticeId   String
+  notice     Notice          @relation(fields: [noticeId], references: [id], onDelete: Cascade)
+  attendeeId String
+  attendee   MeetingAttendee @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
+
+  status         String    @default("SENT") // SENT | ACKNOWLEDGED
+  sentAt         DateTime  @default(now())
+  acknowledgedAt DateTime?
+
+  @@unique([noticeId, attendeeId])
+  @@index([noticeId])
 }
 
 // ---------------------------------------------------------------------------

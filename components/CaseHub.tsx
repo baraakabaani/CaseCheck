@@ -49,7 +49,17 @@ export function CaseHub({ caseDetail }: { caseDetail: CaseDetail }) {
   const module1Complete = caseDetail.intakeStatus === "ACTIVE";
   const laterModulesUnlocked = module1Complete;
 
-  const hearingStatus = (caseDetail.hearingSession?.status ?? "NOT_SCHEDULED") as HearingStatus;
+  // أعلى حالة اجتماع بين كل اجتماعات الدعوى (قد تُعقد أكثر من مرة).
+  const HEARING_STATUS_PRIORITY: Record<HearingStatus, number> = {
+    NOT_SCHEDULED: 0,
+    SCHEDULED: 1,
+    IN_PROGRESS: 2,
+    COMPLETED: 3,
+  };
+  const hearingStatus = caseDetail.hearingSessions.reduce<HearingStatus>((best, s) => {
+    const status = s.status as HearingStatus;
+    return HEARING_STATUS_PRIORITY[status] > HEARING_STATUS_PRIORITY[best] ? status : best;
+  }, "NOT_SCHEDULED");
 
   const requirementsTotal = caseDetail.requirements.length;
   const requirementsProvided = caseDetail.requirements.filter(

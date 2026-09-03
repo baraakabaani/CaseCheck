@@ -11,8 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Plus, Trash2, MapPin } from "lucide-react";
 import { formatDate } from "@/lib/format";
+import { DOCUMENT_DEMAND_STATUS_LABELS } from "@/lib/case-hub-labels";
 import type { CaseDetail } from "@/lib/queries";
 import type { RequirementStatus } from "@/lib/schemas";
+import type { DocumentDemandStatus } from "@/lib/hub-schemas";
 
 const BOARD_COLUMNS: { status: RequirementStatus; title: string; accent: string }[] = [
   {
@@ -87,8 +89,58 @@ export function Module3Hub({ caseDetail }: { caseDetail: CaseDetail }) {
         </CardContent>
       </Card>
 
+      <DocumentDemandsSummaryCard caseDetail={caseDetail} />
+
       <SiteInspectionsCard caseDetail={caseDetail} onChanged={refresh} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// مطالبات المستندات الناتجة عن اجتماعات الخبرة (الموديول 2) — عرض للمتابعة
+// هنا؛ إدارتها (إضافة/تعديل الحالة) تتم من غرفة الاجتماع نفسها.
+// ---------------------------------------------------------------------------
+function DocumentDemandsSummaryCard({ caseDetail }: { caseDetail: CaseDetail }) {
+  if (caseDetail.documentDemands.length === 0) return null;
+
+  const partyById = new Map(caseDetail.parties.map((p) => [p.id, p.name]));
+  const now = new Date();
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>مطالبات المستندات من اجتماعات الخبرة</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {caseDetail.documentDemands.map((d) => {
+          const requestedFrom: string[] = (() => {
+            try {
+              const ids = JSON.parse(d.requestedFromPartyIds) as string[];
+              return ids.map((id) => partyById.get(id) ?? id);
+            } catch {
+              return [];
+            }
+          })();
+          const overdue = d.status !== "RECEIVED" && new Date(d.deadline) < now;
+          return (
+            <div key={d.id} className="flex flex-wrap items-center gap-3 rounded-md border p-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">{d.item}</div>
+                <div className="text-xs text-muted-foreground">
+                  من: {requestedFrom.join("، ") || "غير محدد"} · الموعد النهائي: {formatDate(d.deadline)}
+                </div>
+              </div>
+              {overdue && (
+                <Badge variant="outline" className="border-[#c8102e33] bg-[#c8102e0d] text-[#c8102e]">
+                  متأخرة
+                </Badge>
+              )}
+              <Badge variant="secondary">{DOCUMENT_DEMAND_STATUS_LABELS[d.status as DocumentDemandStatus]}</Badge>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 

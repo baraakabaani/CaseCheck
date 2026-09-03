@@ -1,8 +1,11 @@
 import type {
   AttendanceStatus,
   CourtReportStatus,
+  DocumentDemandStatus,
+  HearingQuestionStatus,
   HearingStatus,
   MeetingAttendeeRole,
+  NoticeDeliveryStatus,
 } from "./hub-schemas";
 
 export const MEETING_ATTENDEE_ROLE_LABELS: Record<MeetingAttendeeRole, string> = {
@@ -30,4 +33,22 @@ export const HEARING_STATUS_LABELS: Record<HearingStatus, string> = {
 export const COURT_REPORT_STATUS_LABELS: Record<CourtReportStatus, string> = {
   DRAFT: "مسودة",
   FINAL: "معتمد",
+};
+
+export const HEARING_QUESTION_STATUS_LABELS: Record<HearingQuestionStatus, string> = {
+  PENDING: "لم تُطرح بعد",
+  ANSWERED: "تمت الإجابة",
+  DEFERRED: "مؤجَّل",
+  REFUSED: "رفض الإجابة",
+};
+
+export const DOCUMENT_DEMAND_STATUS_LABELS: Record<DocumentDemandStatus, string> = {
+  PENDING: "مطلوبة",
+  PARTIALLY_RECEIVED: "مستلمة جزئياً",
+  RECEIVED: "مكتملة ومطابقة",
+};
+
+export const NOTICE_DELIVERY_STATUS_LABELS: Record<NoticeDeliveryStatus, string> = {
+  SENT: "تم الإرسال",
+  ACKNOWLEDGED: "تم الاستلام",
 };

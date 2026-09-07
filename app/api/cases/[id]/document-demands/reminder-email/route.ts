@@ -29,6 +29,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     include: {
       parties: true,
       documentDemands: { where: { status: { not: "RECEIVED" } } },
+      analyses: { orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
   if (!caseRecord) {
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const partyById = new Map(caseRecord.parties.map((p) => [p.id, p.name]));
 
   try {
+    const latestAnalysis = caseRecord.analyses[0] ?? null;
     const clientKeys = getClientApiKeysFromRequest(req);
     const outcome = await generateEmailDraft(
       {
@@ -60,6 +62,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         title: caseRecord.title,
         court: caseRecord.court,
         clientName: caseRecord.clientName,
+        caseSummary: latestAnalysis?.caseSummary ?? null,
+        mandateText: latestAnalysis?.mandateText ?? null,
       },
       overdue.map((d) => {
         const requestedFrom = safeParseJson<string[]>(d.requestedFromPartyIds, [])

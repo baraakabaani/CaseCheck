@@ -174,10 +174,21 @@ milestone cards, each linking into its own module page:
    recording of the meeting (`MediaRecorder`, low-bitrate opus so an
    hours-long hearing stays a manageable file size), or an already-recorded
    audio file — and it's corrected using the case's own context (party
-   names, case summary, mandate, the prepared questions) as ground truth,
-   with any answered questions matched back automatically (fuzzy text
-   matching via `lib/text-normalize.ts`, since the model can't know
-   internal IDs). The two audio paths are transcribed first via Groq's
+   names, case summary, mandate, the prepared questions) as ground truth.
+   The correction prompt leans on that context actively, not just for
+   literal name-spelling: a mangled accounting/legal term or an unclear
+   phrase caused by a bad speech-to-text capture gets resolved with
+   confidence when the case summary or mandate text makes the intended
+   meaning unambiguous (verified live: "الشركه"/"موسسة"/"المديونيه
+   المتبادله" and similar speech-to-text artifacts corrected to their
+   proper forms using a synthetic partnership-dispute mandate as context).
+   The one hard limit carried over unchanged: it never invents a word, a
+   number, or an answer that has no trace in the actual text — a part that
+   stays genuinely unclear even after using all available context is left
+   marked `[غير واضح]` instead of being guessed. Any answered questions are
+   matched back automatically (fuzzy text matching via
+   `lib/text-normalize.ts`, since the model can't know internal IDs). The
+   two audio paths are transcribed first via Groq's
    Whisper endpoint (`lib/audio-transcription.ts`,
    `client.audio.transcriptions.create`, `language: "ar"`) into the exact
    same raw text the paste/upload paths produce, then flow through the
@@ -209,7 +220,15 @@ milestone cards, each linking into its own module page:
    set. An overdue-reminder card generates a تذكير letter for every
    past-deadline demand by feeding them into the **same unmodified**
    `generateEmailDraft()` used for Module 1's client letters — no new AI
-   code, just a different input shape. The site-inspection log
+   code, just a different input shape. `generateEmailDraft()` itself
+   (`lib/email-templates.ts`) now also takes the case's `caseSummary` and
+   `mandateText` from the Phase-4 analysis, so both letters open with a
+   sentence grounded in the actual dispute/mandate instead of a generic
+   "استكمال إجراءات تدقيق ملف الدعوى" line (verified live: a synthetic
+   partnership/subcontract-dispute mandate produced an opening paragraph
+   quoting that mandate specifically) — same "never invent a fact not
+   given" constraint as before, just fuller use of what's already known
+   about the case. The site-inspection log
    (`SiteInspection`) now captures structured fields (equipment/servers
    reviewed, financial books reviewed), attachable documents, and
    structured on-site testimonies (`SiteInspectionTestimony`), and a

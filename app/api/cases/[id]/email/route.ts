@@ -27,6 +27,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         where: { status: { in: ["MISSING", "PARTIALLY_PROVIDED"] } },
         orderBy: { order: "asc" },
       },
+      analyses: { orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
   if (!caseRecord) {
@@ -50,6 +51,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
+    const latestAnalysis = caseRecord.analyses[0] ?? null;
     const clientKeys = getClientApiKeysFromRequest(req);
     const outcome = await generateEmailDraft(
       {
@@ -57,6 +59,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         title: caseRecord.title,
         court: caseRecord.court,
         clientName: caseRecord.clientName,
+        caseSummary: latestAnalysis?.caseSummary ?? null,
+        mandateText: latestAnalysis?.mandateText ?? null,
       },
       caseRecord.requirements.map((r) => ({
         labelAr: r.labelAr,

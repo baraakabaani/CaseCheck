@@ -88,9 +88,15 @@ export function ReportTaskSection({
   async function saveField(field: keyof typeof fields, provenanceField: string) {
     setSavingField(field);
     try {
+      // نص فارغ لا يُعتبر "اعتماداً" حتى لو مسحه الخبير عمداً — تركه بلا
+      // تغيير في الحالة يمنع منعه من التوليد لاحقاً دون داعٍ.
+      const isEmpty = !fields[field].trim();
       // تعديل نص من الخبير يُعتمَد تلقائياً — لا حاجة لحالة سابقة، EDIT
       // ينتج EXPERT_CERTIFIED دوماً (انظر lib/reports/provenance.ts).
-      await patchTask({ [field]: fields[field], [provenanceField]: nextProvenance("AI_DRAFT", "EDIT") });
+      await patchTask({
+        [field]: fields[field],
+        ...(isEmpty ? {} : { [provenanceField]: nextProvenance("AI_DRAFT", "EDIT") }),
+      });
       onChanged();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "فشل حفظ التعديل");
@@ -100,6 +106,10 @@ export function ReportTaskSection({
   }
 
   async function certifyField(field: keyof typeof fields, provenanceField: string) {
+    if (!fields[field].trim()) {
+      toast.error("لا يمكن اعتماد فقرة فارغة — اكتب رأي الخبرة أولاً");
+      return;
+    }
     setSavingField(field);
     try {
       await patchTask({ [field]: fields[field], [provenanceField]: "EXPERT_CERTIFIED" });

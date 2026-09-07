@@ -53,6 +53,9 @@ export function isCertified(state: ProvenanceState | null | undefined): boolean 
 export interface ExportGateTaskLike {
   taskIndex: number;
   expertVerdictProvenance: string;
+  /** اختياري لتوافق الاستدعاءات القديمة، لكن يجب تمريره فعلياً — "معتمد"
+   * على حقل فارغ لا يعني شيئاً (انظر التعليق أدناه). */
+  expertVerdict?: string | null;
 }
 
 export interface ExportGateResult {
@@ -63,11 +66,15 @@ export interface ExportGateResult {
 
 /** بوابة التصدير/الاعتماد الحقيقية — تُستدعى من الخادم (المصدر الملزم) ومن
  * العميل (لتعطيل الأزرار فوراً دون انتظار استجابة الخادم). تقرير بلا مهام
- * على الإطلاق يُعتبر محجوباً أيضاً — لا يوجد تقرير خبرة حقيقي بلا مهام. */
+ * على الإطلاق يُعتبر محجوباً أيضاً — لا يوجد تقرير خبرة حقيقي بلا مهام.
+ * وسم EXPERT_CERTIFIED على حقل فارغ فعلياً (مثال: صف مُرحَّل من نسخة سابقة
+ * لم يكتب فيها الخبير شيئاً) لا يُحتسَب اعتماداً حقيقياً — يجب أن يوجد نص
+ * فعلي أيضاً. */
 export function isExportBlocked(tasks: ExportGateTaskLike[]): ExportGateResult {
-  const uncertifiedTaskIndexes = tasks
-    .filter((t) => t.expertVerdictProvenance !== "EXPERT_CERTIFIED")
-    .map((t) => t.taskIndex);
+  const isReallyCertified = (t: ExportGateTaskLike) =>
+    t.expertVerdictProvenance === "EXPERT_CERTIFIED" &&
+    (t.expertVerdict === undefined || (typeof t.expertVerdict === "string" && t.expertVerdict.trim().length > 0));
+  const uncertifiedTaskIndexes = tasks.filter((t) => !isReallyCertified(t)).map((t) => t.taskIndex);
   return {
     blocked: tasks.length === 0 || uncertifiedTaskIndexes.length > 0,
     uncertifiedTaskIndexes,

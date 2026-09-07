@@ -43,10 +43,16 @@ export function ReportPreliminarySections({
   async function save(key: SectionKey) {
     setSaving(key);
     try {
+      // نص فارغ لا يُعتبر "اعتماداً من الخبير" — لو وُسم كذلك سيمنع التوليد
+      // من ملء هذا الحقل إلى الأبد رغم عدم وجود محتوى حقيقي فيه.
+      const isEmpty = !fields[key].trim();
       const res = await fetch(`/api/cases/${caseId}/court-report`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...buildClientApiKeyHeaders() },
-        body: JSON.stringify({ [key]: fields[key], [`${key}Provenance`]: "EXPERT_CERTIFIED" }),
+        body: JSON.stringify({
+          [key]: fields[key],
+          ...(isEmpty ? {} : { [`${key}Provenance`]: "EXPERT_CERTIFIED" }),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "فشل حفظ التعديل");

@@ -18,6 +18,13 @@ const PRELIMINARY_FIELDS = [
   "documentInventory",
 ] as const;
 
+/** "معتمد من الخبير" يجب أن يعني فعلاً وجود نص اعتمده الخبير — صف مُرحَّل
+ * من نسخة سابقة (أو أي حالة أخرى) قد يحمل الوسم EXPERT_CERTIFIED على حقل
+ * فارغ فعلياً؛ معاملة ذلك كـ"معتمد" كان يمنع توليده للأبد. */
+function hasRealContent(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 // موديول 4 — توليد/إعادة توليد التقرير القضائي: يجمع البيانات الحتمية عبر
 // lib/reports/report-aggregator.ts، ثم يستدعي lib/report-draft-ai.ts
 // لصياغة السرد التوليدي فقط. مهمة اعتُمد "رأي الخبرة" فيها بالفعل لا
@@ -55,7 +62,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const tasksToGenerate = aggregate.tasks.filter((t) => {
     const existing = existingTaskByIndex.get(t.taskIndex);
-    const isCertified = existing?.expertVerdictProvenance === "EXPERT_CERTIFIED";
+    const isCertified = existing?.expertVerdictProvenance === "EXPERT_CERTIFIED" && hasRealContent(existing?.expertVerdict);
     return !isCertified || forceRegenerate.has(t.taskIndex);
   });
 
@@ -89,14 +96,18 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     };
     for (const field of PRELIMINARY_FIELDS) {
       const existingProvenance = existingReport?.[`${field}Provenance` as keyof typeof existingReport];
-      if (existingProvenance === "EXPERT_CERTIFIED") {
+      const existingValue = existingReport?.[field as keyof typeof existingReport];
+      if (existingProvenance === "EXPERT_CERTIFIED" && hasRealContent(existingValue)) {
         preservedCertifiedFields++;
-        continue; // النص الذي اعتمده الخبير لا يُستبدَل بإعادة التوليد
+        continue; // النص الذي اعتمده الخبير فعلاً لا يُستبدَل بإعادة التوليد
       }
       reportData[field] = outcome.result.preliminarySections[field];
       reportData[`${field}Provenance`] = deterministicOfflineFields.has(field) ? "EXTRACT" : "AI_DRAFT";
     }
-    if (existingReport?.settlementNarrativeProvenance === "EXPERT_CERTIFIED") {
+    if (
+      existingReport?.settlementNarrativeProvenance === "EXPERT_CERTIFIED" &&
+      hasRealContent(existingReport?.settlementNarrative)
+    ) {
       preservedCertifiedFields++;
       delete reportData.settlementBeneficiary;
       delete reportData.settlementNarrative;
@@ -111,7 +122,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
     for (const task of aggregate.tasks) {
       const existing = existingTaskByIndex.get(task.taskIndex);
-      const isCertified = existing?.expertVerdictProvenance === "EXPERT_CERTIFIED";
+      const isCertified = existing?.expertVerdictProvenance === "EXPERT_CERTIFIED" && hasRealContent(existing?.expertVerdict);
       const wasRegenerated = tasksToGenerate.some((t) => t.taskIndex === task.taskIndex);
 
       const exhibitLinksJson = JSON.stringify(task.exhibitLinks);
@@ -167,7 +178,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     // (تقلّصت القائمة) — تُحذَف فقط إن لم تحمل رأي خبرة معتمَداً؛ أي مهمة
     // معتمَدة تبقى محفوظة (تُعرَض في الواجهة كـ"مهمة لم تعد ضمن المأمورية").
     for (const [taskIndex, existing] of existingTaskByIndex) {
-      if (taskIndex >= aggregate.tasks.length && existing.expertVerdictProvenance !== "EXPERT_CERTIFIED") {
+      const stillCertified = existing.expertVerdictProvenance === "EXPERT_CERTIFIED" && hasRealContent(existing.expertVerdict);
+      if (taskIndex >= aggregate.tasks.length && !stillCertified) {
         await tx.courtReportTask.delete({ where: { id: existing.id } });
       }
     }

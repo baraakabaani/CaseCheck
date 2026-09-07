@@ -27,7 +27,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   if (parsed.data.status === "FINAL") {
     const tasks = await prisma.courtReportTask.findMany({
       where: { courtReport: { caseId } },
-      select: { taskIndex: true, expertVerdictProvenance: true },
+      select: { taskIndex: true, expertVerdictProvenance: true, expertVerdict: true },
       orderBy: { taskIndex: "asc" },
     });
     const gate = isExportBlocked(tasks);

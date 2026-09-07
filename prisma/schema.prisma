@@ -445,8 +445,11 @@ model SiteInspectionTestimony {
 }
 
 // ---------------------------------------------------------------------------
-// الموديول 4 — استوديو إعداد التقرير القضائي (نسخة مبسّطة v1: حقول نصية
-// حرة لكل تبويب؛ التجميع الآلي والأقسام الديناميكية لكل مهمة تطوير لاحق).
+// الموديول 4 — استوديو التقرير القضائي (v2: أقسام تمهيدية مُجمَّعة آلياً من
+// الموديولات 1-3 + تتبّع مصدر كل كتلة نصية (provenance) + قسم مستقل لكل
+// مهمة من مهام المأمورية، انظر CourtReportTask أدناه). أرقام تصفية الحساب
+// (settlement) تُحسب من أرقام المهام المعتمدة — لا تُخزَّن كأرقام مستقلة
+// هنا لتفادي "أرقام إجمالية بلا سند" (انظر lib/reports/liquidation.ts).
 // ---------------------------------------------------------------------------
 model CourtReport {
   id     String @id @default(cuid())
@@ -455,11 +458,77 @@ model CourtReport {
 
   status String @default("DRAFT") // DRAFT | FINAL
 
-  introductionMandate  String? // المقدمة والمأمورية
-  partiesAndProcedures String? // الأطراف والإجراءات
-  taskAnalysis         String? // البحث والدراسة (المهام)
-  conclusionSettlement String? // الخلاصة وتصفية الحساب
-  documentsIndex       String? // حافظة المستندات
+  // الأقسام التمهيدية
+  introduction      String? // المقدمة
+  mandateSummary    String? // ملخص المأمورية
+  partiesOverview   String? // الأطراف وصفاتهم
+  proceduralHistory String? // الإجراءات (سرد فوق الجدول الزمني المُجمَّع آلياً)
+  documentInventory String? // حافظة المستندات (سرد فوق الجرد المُجمَّع آلياً)
+
+  // مصدر كل قسم: EXTRACT | AI_DRAFT | EXPERT_CERTIFIED
+  introductionProvenance      String @default("AI_DRAFT")
+  mandateSummaryProvenance    String @default("AI_DRAFT")
+  partiesOverviewProvenance   String @default("AI_DRAFT")
+  proceduralHistoryProvenance String @default("AI_DRAFT")
+  documentInventoryProvenance String @default("AI_DRAFT")
+
+  // الخلاصة وتصفية الحساب — السرد فقط؛ الأرقام محسوبة من CourtReportTask
+  settlementBeneficiary         String?
+  settlementNarrative           String?
+  settlementNarrativeProvenance String  @default("AI_DRAFT")
+
+  // لقطة التجميع الحتمي وقت آخر توليد (JSON — نفس عرف تخزين JSON كنص
+  // المُتّبع في كل هذا المخطط لقاعدة SQLite)
+  timelineJson    String? // JSON: ProceduralTimelineEvent[]
+  inventoryJson   String? // JSON: DocumentInventory
+  partyClaimsJson String? // JSON: PartyClaimsSnapshot
+
+  generationMode    String? // AI | OFFLINE — نتيجة آخر توليد
+  generationWarning String?
+  lastGeneratedAt   DateTime?
+  finalizedAt       DateTime?
 
   updatedAt DateTime @updatedAt
+
+  tasks CourtReportTask[]
+}
+
+// قسم مستقل لكل مهمة من مهام المأمورية (CaseAnalysis.mandateTasks). بما أن
+// تلك المصفوفة نصوص حرة بلا معرّفات ثابتة، هذا الصف هو الهوية المستقرة
+// للمهمة: يلتقط نصها حرفياً وترتيبها (taskIndex) وقت التوليد.
+model CourtReportTask {
+  id            String      @id @default(cuid())
+  courtReportId String
+  courtReport   CourtReport @relation(fields: [courtReportId], references: [id], onDelete: Cascade)
+
+  taskIndex Int // ترتيب المهمة في mandateTasks وقت اللقطة (0-based)
+  taskText  String // نص المهمة حرفياً كما ورد في المأمورية
+
+  claimantPosition   String? // موقف المدعي
+  respondentPosition String? // موقف المدعى عليه
+  forensicAnalysis   String? // بحث الخبرة
+  missingDocsImpact  String? // أثر المستندات الناقصة (حتمي دوماً — EXTRACT)
+  expertVerdict      String? // رأي الخبرة — الكتلة الوحيدة التي تحكم بوابة التصدير
+
+  claimantPositionProvenance   String @default("AI_DRAFT")
+  respondentPositionProvenance String @default("AI_DRAFT")
+  forensicAnalysisProvenance   String @default("AI_DRAFT")
+  expertVerdictProvenance      String @default("AI_DRAFT")
+
+  claimantAmount   Float? // مطالبة المدعي المعتمدة لهذه المهمة (درهم) — null لمهمة غير مالية
+  respondentOffset Float? // خصم/مقاصة المدعى عليه المعتمدة (درهم)
+  amountNote       String? // سند الرقم (مستند/أساس الاحتساب)
+
+  // مرفقات المهمة — تُحسب آلياً وقت التوليد (مطابقة نصية مع relatedTask)
+  // وتبقى قابلة للتعديل اليدوي بعدها، بنفس عرف SiteInspection.attachmentDocumentIds
+  linkedDocumentIds    String? // JSON string[] — Document.id
+  linkedRequirementIds String? // JSON string[] — Requirement.id
+  linkedDemandIds      String? // JSON string[] — DocumentDemand.id
+  exhibitLinksJson     String? // JSON: [{ documentId, via, score, sourceLabel }]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([courtReportId, taskIndex])
+  @@index([courtReportId])
 }

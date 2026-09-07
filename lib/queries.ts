@@ -23,7 +23,7 @@ export function getCaseDetail(id: string) {
         orderBy: { visitDate: "desc" },
         include: { testimonies: { orderBy: { order: "asc" } } },
       },
-      courtReport: true,
+      courtReport: { include: { tasks: { orderBy: { taskIndex: "asc" } } } },
     },
   });
 }
@@ -40,6 +40,7 @@ export type HearingSessionSummary = CaseDetail["hearingSessions"][number];
 export type DocumentDemandDetail = CaseDetail["documentDemands"][number];
 export type SiteInspectionDetail = CaseDetail["siteInspections"][number];
 export type CourtReportDetail = CaseDetail["courtReport"];
+export type CourtReportTaskDetail = NonNullable<CaseDetail["courtReport"]>["tasks"][number];
 
 export function getNoticeDetail(caseId: string, noticeId: string) {
   return prisma.notice.findFirst({ where: { id: noticeId, caseId } });

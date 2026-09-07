@@ -5,7 +5,12 @@ import {
   ImageRun,
   Packer,
   Paragraph,
+  Table,
+  TableCell,
+  TableRow,
   TextRun,
+  ShadingType,
+  WidthType,
 } from "docx";
 
 export interface EmailDocxInput {
@@ -92,71 +97,241 @@ export async function buildEmailDocxBlob({ subject, bodyAr }: EmailDocxInput): P
   return Packer.toBlob(doc);
 }
 
-export interface CourtReportDocxSection {
+// ---------------------------------------------------------------------------
+// موديول 4 (v2) — استوديو التقرير القضائي: أقسام تمهيدية + قسم مستقل لكل
+// مهمة من مهام المأمورية + جدول تصفية حساب حقيقي + حافظة مستندات، بترويسة
+// Parker Russell. لا تلوين حسب المصدر (provenance) في المستند المُصدَّر —
+// هذا هو ملف التقرير الرسمي، وبوابة التصدير تضمن أصلاً اعتماد "رأي
+// الخبرة" في كل مهمة قبل السماح بالتصدير.
+// ---------------------------------------------------------------------------
+
+function arabicParagraph(
+  text: string,
+  opts: { bold?: boolean; size?: number; spacingBefore?: number; spacingAfter?: number } = {},
+): Paragraph {
+  return new Paragraph({
+    bidirectional: true,
+    alignment: AlignmentType.RIGHT,
+    spacing: { before: opts.spacingBefore ?? 0, after: opts.spacingAfter ?? 140 },
+    children: [
+      new TextRun({ text: text || " ", bold: opts.bold, size: opts.size, rightToLeft: true, font: "Arial" }),
+    ],
+  });
+}
+
+function arabicMultilineParagraphs(text: string | null, fallback = "لم تتم تعبئة هذا القسم بعد."): Paragraph[] {
+  return (text || fallback).split("\n").map((line) => arabicParagraph(line));
+}
+
+const TABLE_HEADER_SHADING = { fill: "C8102E", type: ShadingType.CLEAR };
+const TABLE_TOTAL_SHADING = { fill: "F1EAD9", type: ShadingType.CLEAR };
+
+function tableCellParagraph(text: string, opts: { bold?: boolean; white?: boolean } = {}): Paragraph {
+  return new Paragraph({
+    bidirectional: true,
+    alignment: AlignmentType.RIGHT,
+    children: [
+      new TextRun({
+        text: text || "—",
+        bold: opts.bold,
+        color: opts.white ? "FFFFFF" : undefined,
+        rightToLeft: true,
+        font: "Arial",
+        size: 20,
+      }),
+    ],
+  });
+}
+
+/** جدول RTL عام (رأس مظلَّل + صفوف بيانات + صف إجمالي اختياري) — يُستخدم
+ * لجدول تصفية الحساب وحافظة المستندات معاً بدل تكرار بناء الجدول مرتين. */
+function buildDocxTable({
+  head,
+  rows,
+  widths,
+  totalsRow,
+}: {
+  head: string[];
+  rows: string[][];
+  widths: number[];
+  totalsRow?: string[];
+}): Table {
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: head.map(
+      (h) =>
+        new TableCell({
+          shading: TABLE_HEADER_SHADING,
+          children: [tableCellParagraph(h, { bold: true, white: true })],
+        }),
+    ),
+  });
+
+  const dataRows = rows.map(
+    (row) =>
+      new TableRow({
+        children: row.map((cell) => new TableCell({ children: [tableCellParagraph(cell)] })),
+      }),
+  );
+
+  const totalRowEl = totalsRow
+    ? [
+        new TableRow({
+          children: totalsRow.map(
+            (cell) =>
+              new TableCell({
+                shading: TABLE_TOTAL_SHADING,
+                children: [tableCellParagraph(cell, { bold: true })],
+              }),
+          ),
+        }),
+      ]
+    : [];
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    columnWidths: widths,
+    visuallyRightToLeft: true,
+    rows: [headerRow, ...dataRows, ...totalRowEl],
+  });
+}
+
+export interface CourtReportDocxPreliminarySection {
   title: string;
-  content: string | null;
+  narrative: string | null;
+  appendix?: string | null;
+}
+
+export interface CourtReportDocxTask {
+  index: number;
+  taskText: string;
+  claimantPosition: string | null;
+  respondentPosition: string | null;
+  exhibitFileNames: string[];
+  forensicAnalysis: string | null;
+  missingDocsImpact: string | null;
+  expertVerdict: string | null;
+}
+
+export interface CourtReportDocxLiquidationRow {
+  taskLabel: string;
+  claimantAmountLabel: string;
+  respondentOffsetLabel: string;
+  netLabel: string;
+}
+
+export interface CourtReportDocxDocumentsIndexRow {
+  label: string;
+  statusLabel: string;
+  documentNames: string;
 }
 
 export interface CourtReportDocxInput {
   caseNumber: string;
   caseTitle: string;
-  sections: CourtReportDocxSection[];
+  preliminary: CourtReportDocxPreliminarySection[];
+  tasks: CourtReportDocxTask[];
+  liquidation: {
+    rows: CourtReportDocxLiquidationRow[];
+    totalClaimantLabel: string;
+    totalRespondentLabel: string;
+    netResultLabel: string;
+    narrative: string | null;
+  };
+  documentsIndex: CourtReportDocxDocumentsIndexRow[];
+  signatureLabel?: string;
 }
 
-/** موديول 4 — استوديو إعداد التقرير القضائي: تصدير أساسي (نص حر لكل
- * تبويب) بترويسة Parker Russell. التجميع الآلي والأقسام الديناميكية لكل
- * مهمة (المهمة رقم 1، 2...) والتلوين حسب المصدر تطوير لاحق. */
 export async function buildCourtReportDocxBlob({
   caseNumber,
   caseTitle,
-  sections,
+  preliminary,
+  tasks,
+  liquidation,
+  documentsIndex,
+  signatureLabel = "توقيع الخبير الحسابي:",
 }: CourtReportDocxInput): Promise<Blob> {
-  const sectionParagraphs = sections.flatMap((s) => [
-    new Paragraph({
-      bidirectional: true,
-      alignment: AlignmentType.RIGHT,
-      spacing: { before: 300, after: 120 },
-      children: [new TextRun({ text: s.title, bold: true, size: 26, rightToLeft: true, font: "Arial" })],
-    }),
-    ...(s.content || "لم تتم تعبئة هذا القسم بعد.")
-      .split("\n")
-      .map(
-        (line) =>
-          new Paragraph({
-            bidirectional: true,
-            alignment: AlignmentType.RIGHT,
-            spacing: { after: 140 },
-            children: [new TextRun({ text: line, rightToLeft: true, font: "Arial" })],
-          }),
-      ),
+  const preliminaryChildren = preliminary.flatMap((s) => [
+    arabicParagraph(s.title, { bold: true, size: 26, spacingBefore: 300, spacingAfter: 120 }),
+    ...arabicMultilineParagraphs(s.narrative),
+    ...(s.appendix ? arabicMultilineParagraphs(s.appendix) : []),
   ]);
+
+  const taskChildren = tasks.flatMap((t) => [
+    arabicParagraph(`المهمة رقم ${t.index + 1}: ${t.taskText}`, {
+      bold: true,
+      size: 24,
+      spacingBefore: 360,
+      spacingAfter: 140,
+    }),
+    arabicParagraph("موقف المدعي:", { bold: true, spacingAfter: 60 }),
+    ...arabicMultilineParagraphs(t.claimantPosition, "لم يُدرَج موقف المدعي."),
+    arabicParagraph("موقف المدعى عليه:", { bold: true, spacingAfter: 60 }),
+    ...arabicMultilineParagraphs(t.respondentPosition, "لم يُدرَج موقف المدعى عليه."),
+    arabicParagraph("المستندات المرتبطة:", { bold: true, spacingAfter: 60 }),
+    ...(t.exhibitFileNames.length > 0
+      ? t.exhibitFileNames.map((name, i) => arabicParagraph(`${i + 1}. ${name}`))
+      : [arabicParagraph("لا توجد مستندات مرتبطة.")]),
+    arabicParagraph("بحث الخبرة:", { bold: true, spacingAfter: 60 }),
+    ...arabicMultilineParagraphs(t.forensicAnalysis, "لم يُدرَج بحث الخبرة."),
+    arabicParagraph("أثر المستندات الناقصة:", { bold: true, spacingAfter: 60 }),
+    ...arabicMultilineParagraphs(t.missingDocsImpact, "لا يوجد."),
+    arabicParagraph("رأي الخبرة:", { bold: true, spacingAfter: 60 }),
+    ...arabicMultilineParagraphs(t.expertVerdict, "لم يُعتمد رأي الخبرة."),
+  ]);
+
+  const liquidationTable = buildDocxTable({
+    head: ["المهمة", "مطالبة المدعي", "خصم/مقاصة المدعى عليه", "الصافي"],
+    rows: liquidation.rows.map((r) => [r.taskLabel, r.claimantAmountLabel, r.respondentOffsetLabel, r.netLabel]),
+    widths: [40, 20, 20, 20],
+    totalsRow: ["الإجمالي", liquidation.totalClaimantLabel, liquidation.totalRespondentLabel, liquidation.netResultLabel],
+  });
+
+  const documentsIndexTable =
+    documentsIndex.length > 0
+      ? buildDocxTable({
+          head: ["البند", "الحالة", "المستندات المرفقة"],
+          rows: documentsIndex.map((r) => [r.label, r.statusLabel, r.documentNames]),
+          widths: [40, 20, 40],
+        })
+      : null;
 
   const doc = new Document({
     sections: [
       {
         children: [
           ...(await buildBrandedDocxHeader()),
-          new Paragraph({
-            bidirectional: true,
-            alignment: AlignmentType.RIGHT,
-            spacing: { after: 60 },
-            children: [
-              new TextRun({
-                text: `تقرير الخبرة الحسابية القضائية — الدعوى رقم ${caseNumber}`,
-                bold: true,
-                size: 28,
-                rightToLeft: true,
-                font: "Arial",
-              }),
-            ],
+          arabicParagraph(`تقرير الخبرة الحسابية القضائية — الدعوى رقم ${caseNumber}`, {
+            bold: true,
+            size: 28,
+            spacingAfter: 60,
           }),
-          new Paragraph({
-            bidirectional: true,
-            alignment: AlignmentType.RIGHT,
-            spacing: { after: 300 },
-            children: [new TextRun({ text: caseTitle, size: 22, rightToLeft: true, font: "Arial" })],
+          arabicParagraph(caseTitle, { size: 22, spacingAfter: 400 }),
+
+          arabicParagraph("أولاً: الأقسام التمهيدية", { bold: true, size: 30, spacingAfter: 200 }),
+          ...preliminaryChildren,
+
+          arabicParagraph("ثانياً: البحث والدراسة", { bold: true, size: 30, spacingBefore: 400, spacingAfter: 200 }),
+          ...taskChildren,
+
+          arabicParagraph("ثالثاً: الخلاصة وتصفية الحساب", {
+            bold: true,
+            size: 30,
+            spacingBefore: 400,
+            spacingAfter: 200,
           }),
-          ...sectionParagraphs,
+          ...arabicMultilineParagraphs(liquidation.narrative, "لم تُدرَج خلاصة تصفية الحساب."),
+          new Paragraph({ spacing: { before: 120, after: 300 }, children: [] }),
+          liquidationTable,
+
+          ...(documentsIndexTable
+            ? [
+                arabicParagraph("رابعاً: حافظة المستندات", { bold: true, size: 30, spacingBefore: 400, spacingAfter: 200 }),
+                documentsIndexTable,
+              ]
+            : []),
+
+          arabicParagraph(signatureLabel, { bold: true, spacingBefore: 600 }),
         ],
       },
     ],

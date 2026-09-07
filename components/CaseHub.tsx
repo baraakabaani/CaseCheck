@@ -72,14 +72,9 @@ export function CaseHub({ caseDetail }: { caseDetail: CaseDetail }) {
   ).length;
 
   const reportStatus = (caseDetail.courtReport?.status ?? null) as CourtReportStatus | null;
-  const reportHasContent = Boolean(
-    caseDetail.courtReport &&
-      (caseDetail.courtReport.introductionMandate ||
-        caseDetail.courtReport.partiesAndProcedures ||
-        caseDetail.courtReport.taskAnalysis ||
-        caseDetail.courtReport.conclusionSettlement ||
-        caseDetail.courtReport.documentsIndex),
-  );
+  const reportTasks = caseDetail.courtReport?.tasks ?? [];
+  const certifiedTaskCount = reportTasks.filter((t) => t.expertVerdictProvenance === "EXPERT_CERTIFIED").length;
+  const reportHasContent = Boolean(caseDetail.courtReport?.lastGeneratedAt) || reportTasks.length > 0;
 
   const milestones: MilestoneCard[] = [
     {
@@ -137,9 +132,11 @@ export function CaseHub({ caseDetail }: { caseDetail: CaseDetail }) {
         ? "بانتظار الموديول 1"
         : reportStatus === "FINAL"
           ? "معتمد"
-          : reportHasContent
-            ? "مسودة جاهزة"
-            : "بانتظار الاعتماد",
+          : reportTasks.length > 0
+            ? `${certifiedTaskCount}/${reportTasks.length} مهمة معتمدة`
+            : reportHasContent
+              ? "مسودة جاهزة"
+              : "بانتظار الاعتماد",
       badgeTone: reportStatus === "FINAL" ? "complete" : "progress",
     },
   ];

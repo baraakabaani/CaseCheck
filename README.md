@@ -268,18 +268,61 @@ milestone cards, each linking into its own module page:
    into a محضر (`lib/site-inspection-report.ts`, string-built like the
    إخطار and hearing-minutes templates — not a second AI call), exportable
    to a Parker Russell–branded `.docx` (`buildSiteInspectionReportDocxBlob`).
-4. **الموديول 4 — صياغة التقرير القضائي** (`/cases/[id]/module-4`) — a
-   5-tab report draft (`CourtReport`: المقدمة والمأمورية | الأطراف
-   والإجراءات | البحث والدراسة | الخلاصة وتصفية الحساب | حافظة
-   المستندات), autosaved, exportable to a Parker Russell–branded `.docx`
-   (`lib/docx-export.ts`'s `buildCourtReportDocxBlob`).
+4. **الموديول 4 — صياغة التقرير القضائي** (`/cases/[id]/module-4`,
+   `components/Module4Studio.tsx`) — also rebuilt to full depth: a
+   deterministic aggregation layer (`lib/reports/report-aggregator.ts`)
+   pulls real data across Modules 1–3 — case/mandate basics, a
+   chronological procedural timeline built from actual timestamps
+   scattered across the schema (mandate dates, notice issue/delivery,
+   hearing start, transcript correction, document demands grouped by
+   day, site visits), a verified document inventory (every `PROVIDED`/
+   `PARTIALLY_PROVIDED` requirement joined to its matched documents), and
+   each party's claims/defenses (smart-ingest digests of their pleadings
+   plus their actual hearing Q&A answers) — no AI in this layer at all,
+   same "compile, don't generate" boundary as the rest of the app.
+   `CaseAnalysis.mandateTasks` is a plain string array with no stable id,
+   so each mandate task gets snapshotted into its own `CourtReportTask`
+   row (verbatim text + a stable index) the first time the report is
+   generated; a requirement/demand's `relatedTask` free text is matched
+   back to the right task via the same fuzzy token-coverage technique
+   `lib/hearing-transcript-ai.ts` already uses for matching answers to
+   questions — verified live with a controlled exact-text match. Each
+   task gets its own AI-drafted section (`lib/report-draft-ai.ts`, one
+   request per task plus one for the preliminary sections — a monolithic
+   single request would blow past a free-tier budget the same way a long
+   hearing transcript does, so it's chunked the same way, through the
+   same Groq→Gemini failover, with the same per-chunk honest-degradation
+   behavior): claimant/respondent arguments, a forensic comparative
+   study, missing-documents impact (compiled deterministically, not
+   generated), and a tentative finding that becomes that task's "رأي
+   الخبرة" starting point.
+   **Provenance tracking**: every generated block carries one of three
+   states — `EXTRACT` (verbatim/compiled from real records), `AI_DRAFT`
+   (model output, unreviewed), `EXPERT_CERTIFIED` (edited or explicitly
+   certified by the expert) — shown as a colored badge/border, not
+   per-character highlighting (a full rich-text inline-provenance editor
+   was considered and deliberately not built — real engineering risk for
+   marginal benefit over one badge per block). **The export/finalize gate
+   is enforced server-side, not just in the UI**: `PATCH .../court-report
+   { status: "FINAL" }` returns `409` naming every task whose "رأي
+   الخبرة" isn't yet `EXPERT_CERTIFIED` — verified live, including that a
+   report with zero tasks is also blocked. Regenerating an already-
+   certified task's content is a no-op by design (verified live: identical
+   text and provenance after a second generation call) so re-running the
+   pipeline can never silently overwrite work the expert already signed
+   off on. A **forensic liquidation table** (`ForensicLiquidationTable.tsx`,
+   math in `lib/reports/liquidation.ts`) computes claimant/respondent
+   totals and the net result purely by summing each task's own
+   `claimantAmount`/`respondentOffset` — there is no independent total
+   figure the AI can invent; a task with no amount simply doesn't produce
+   a row, and a row whose task isn't yet certified is flagged, not
+   hidden. Export renders the same structure into a Parker
+   Russell–branded `.docx` with a real Word table for the liquidation
+   section (`lib/docx-export.ts`, first use of the `docx` package's table
+   API in this codebase).
 
-Module 4 is still a deliberate **first pass**: a real Prisma model and a
-genuinely working page, but not yet the AI-aggregated per-task forensic
-sections with color-coded provenance described in the original spec —
-its own follow-up build. Modules 2 and 3 were both taken to full depth
-per later requests (see above). Modules 2–4 stay locked (dimmed,
-non-clickable) until Module 1 is complete.
+Modules 2–4 stay locked (dimmed, non-clickable) until Module 1 is
+complete.
 
 State stays server-authoritative throughout (Prisma/SQLite via
 `lib/queries.ts`'s `getCaseDetail`, `router.refresh()` after any mutation —
@@ -297,7 +340,8 @@ app/                    RTL App Router pages + API routes
   cases/[id]/module-2/   Meeting readiness, scheduler, attendees, notices
   cases/[id]/module-3/   Unified document-tracking board + site-inspection
                          reports
-  cases/[id]/module-4/   Court report draft studio
+  cases/[id]/module-4/   Forensic report studio — aggregation, per-task
+                         AI drafting, provenance, liquidation table
   cases/[id]/notices/    Expert-meeting notice (إخطار) creation + view
   api/cases/...          REST endpoints backing all of the above
 components/             CaseHub, ModuleTopBar, Module2Hub, Module3Hub,

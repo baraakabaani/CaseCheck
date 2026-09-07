@@ -150,16 +150,54 @@ export const updateDocumentDemandSchema = z.object({
 });
 export type UpdateDocumentDemandInput = z.infer<typeof updateDocumentDemandSchema>;
 
-// --- الموديول 4: استوديو إعداد التقرير القضائي --------------------------
+// --- الموديول 4: استوديو التقرير القضائي (v2 — تجميع آلي + مهام مستقلة) --
 export const COURT_REPORT_STATUSES = ["DRAFT", "FINAL"] as const;
 export type CourtReportStatus = (typeof COURT_REPORT_STATUSES)[number];
 
+// مصدر كل كتلة نصية في التقرير — يُستخدَم client وserver معاً
+// (lib/reports/provenance.ts هو المرجع الوحيد لمنطق الانتقال بين الحالات).
+export const PROVENANCE_STATES = ["EXTRACT", "AI_DRAFT", "EXPERT_CERTIFIED"] as const;
+export type ProvenanceState = (typeof PROVENANCE_STATES)[number];
+
 export const updateCourtReportSchema = z.object({
   status: z.enum(COURT_REPORT_STATUSES).optional(),
-  introductionMandate: z.string().optional().nullable(),
-  partiesAndProcedures: z.string().optional().nullable(),
-  taskAnalysis: z.string().optional().nullable(),
-  conclusionSettlement: z.string().optional().nullable(),
-  documentsIndex: z.string().optional().nullable(),
+  introduction: z.string().optional().nullable(),
+  mandateSummary: z.string().optional().nullable(),
+  partiesOverview: z.string().optional().nullable(),
+  proceduralHistory: z.string().optional().nullable(),
+  documentInventory: z.string().optional().nullable(),
+  introductionProvenance: z.enum(PROVENANCE_STATES).optional(),
+  mandateSummaryProvenance: z.enum(PROVENANCE_STATES).optional(),
+  partiesOverviewProvenance: z.enum(PROVENANCE_STATES).optional(),
+  proceduralHistoryProvenance: z.enum(PROVENANCE_STATES).optional(),
+  documentInventoryProvenance: z.enum(PROVENANCE_STATES).optional(),
+  settlementBeneficiary: z.string().optional().nullable(),
+  settlementNarrative: z.string().optional().nullable(),
+  settlementNarrativeProvenance: z.enum(PROVENANCE_STATES).optional(),
 });
 export type UpdateCourtReportInput = z.infer<typeof updateCourtReportSchema>;
+
+export const updateCourtReportTaskSchema = z.object({
+  claimantPosition: z.string().optional().nullable(),
+  respondentPosition: z.string().optional().nullable(),
+  forensicAnalysis: z.string().optional().nullable(),
+  missingDocsImpact: z.string().optional().nullable(),
+  expertVerdict: z.string().optional().nullable(),
+  claimantPositionProvenance: z.enum(PROVENANCE_STATES).optional(),
+  respondentPositionProvenance: z.enum(PROVENANCE_STATES).optional(),
+  forensicAnalysisProvenance: z.enum(PROVENANCE_STATES).optional(),
+  expertVerdictProvenance: z.enum(PROVENANCE_STATES).optional(),
+  claimantAmount: z.number().finite().nullable().optional(),
+  respondentOffset: z.number().finite().nullable().optional(),
+  amountNote: z.string().optional().nullable(),
+  linkedDocumentIds: z.array(z.string()).optional(),
+});
+export type UpdateCourtReportTaskInput = z.infer<typeof updateCourtReportTaskSchema>;
+
+// جسم طلب التوليد فارغ اليوم (regenerateTaskIndexes مُفسَح للمستقبل — إعادة
+// توليد مهمة واحدة بدل التقرير كاملاً)، لكن مُعرَّف كمخطط Zod فعلي بدل قبول
+// أي جسم JSON، اتساقاً مع بقية مسارات هذا التطبيق.
+export const generateCourtReportDraftSchema = z.object({
+  regenerateTaskIndexes: z.array(z.number().int().min(0)).optional(),
+});
+export type GenerateCourtReportDraftInput = z.infer<typeof generateCourtReportDraftSchema>;

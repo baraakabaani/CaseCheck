@@ -25,20 +25,37 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
 
   if (parsed.data.status === "FINAL") {
-    const tasks = await prisma.courtReportTask.findMany({
-      where: { courtReport: { caseId } },
-      select: { taskIndex: true, expertVerdictProvenance: true, expertVerdict: true },
-      orderBy: { taskIndex: "asc" },
-    });
-    const gate = isExportBlocked(tasks);
+    const [tasks, tables, objections, reportRow] = await Promise.all([
+      prisma.courtReportTask.findMany({
+        where: { courtReport: { caseId } },
+        select: { taskIndex: true, expertVerdictProvenance: true, expertVerdict: true },
+        orderBy: { taskIndex: "asc" },
+      }),
+      prisma.courtReportTable.findMany({
+        where: { courtReport: { caseId } },
+        select: { id: true, provenance: true, rowsJson: true },
+      }),
+      prisma.reportObjection.findMany({
+        where: { courtReport: { caseId } },
+        select: { id: true, objectionText: true, responseText: true, responseProvenance: true },
+      }),
+      prisma.courtReport.findUnique({
+        where: { caseId },
+        select: { conclusionProvenance: true, conclusionItemsJson: true },
+      }),
+    ]);
+    const gate = isExportBlocked(tasks, { tables, objections, report: reportRow ?? undefined });
     if (gate.blocked) {
       return NextResponse.json(
         {
           error:
             tasks.length === 0
               ? "لا يمكن اعتماد التقرير قبل توليده — لا توجد أي مهمة بعد."
-              : "لا يمكن اعتماد التقرير قبل اعتماد «رأي الخبرة» في كل مهمة.",
+              : "لا يمكن اعتماد التقرير قبل اعتماد «رأي الخبرة» في كل مهمة، وكل جدول مالي، وكل رد على اعتراض، والخلاصة.",
           uncertifiedTaskIndexes: gate.uncertifiedTaskIndexes,
+          uncertifiedTableIds: gate.uncertifiedTableIds,
+          uncertifiedObjectionIds: gate.uncertifiedObjectionIds,
+          conclusionUncertified: gate.conclusionUncertified,
         },
         { status: 409 },
       );

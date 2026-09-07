@@ -174,6 +174,23 @@ export const updateCourtReportSchema = z.object({
   settlementBeneficiary: z.string().optional().nullable(),
   settlementNarrative: z.string().optional().nullable(),
   settlementNarrativeProvenance: z.enum(PROVENANCE_STATES).optional(),
+  // خطاب الغلاف الموجَّه للقاضي
+  judgeName: z.string().optional().nullable(),
+  judgeTitle: z.string().optional().nullable(),
+  letterDate: z.string().datetime().optional().nullable(),
+  // خامساً: نطاق الفحص
+  scopeNarrative: z.string().optional().nullable(),
+  scopeNarrativeProvenance: z.enum(PROVENANCE_STATES).optional(),
+  // سابعاً: عرض التقرير المبدئي على الأطراف
+  preliminaryReportSharedAt: z.string().datetime().optional().nullable(),
+  objectionsDeadline: z.string().datetime().optional().nullable(),
+  objectionsIntro: z.string().optional().nullable(),
+  objectionsIntroProvenance: z.enum(PROVENANCE_STATES).optional(),
+  // ثامناً: الخلاصة
+  conclusionIntro: z.string().optional().nullable(),
+  conclusionItemsJson: z.string().optional().nullable(),
+  conclusionClosing: z.string().optional().nullable(),
+  conclusionProvenance: z.enum(PROVENANCE_STATES).optional(),
 });
 export type UpdateCourtReportInput = z.infer<typeof updateCourtReportSchema>;
 
@@ -201,3 +218,78 @@ export const generateCourtReportDraftSchema = z.object({
   regenerateTaskIndexes: z.array(z.number().int().min(0)).optional(),
 });
 export type GenerateCourtReportDraftInput = z.infer<typeof generateCourtReportDraftSchema>;
+
+// --- الموديول 4: جداول التقرير القضائي (CourtReportTable) ---
+export const COURT_REPORT_TABLE_PLACEMENTS = ["SCOPE", "TASK", "SETTLEMENT"] as const;
+export type CourtReportTablePlacement = (typeof COURT_REPORT_TABLE_PLACEMENTS)[number];
+
+// مصدر أرقام الجدول (لا علاقة له بـ provenance — ذاك حالة مراجعة الخبير،
+// وهذا مصدر الأرقام نفسها؛ كلاهما مطلوب قبل التصدير. انظر تعليق النموذج
+// في prisma/schema.prisma).
+export const COURT_REPORT_TABLE_COMPUTATIONS = ["DETERMINISTIC", "AI_PROPOSED", "MANUAL"] as const;
+export type CourtReportTableComputation = (typeof COURT_REPORT_TABLE_COMPUTATIONS)[number];
+
+export const courtReportTableColumnSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  align: z.enum(["start", "center", "end"]).optional(),
+});
+export type CourtReportTableColumn = z.infer<typeof courtReportTableColumnSchema>;
+
+export const courtReportTableRowSchema = z.object({
+  cells: z.array(z.string()),
+  isTotal: z.boolean().optional(),
+});
+export type CourtReportTableRow = z.infer<typeof courtReportTableRowSchema>;
+
+// إنشاء جدول يدوي فارغ (زر "إضافة جدول يدوي") — computation دوماً MANUAL هنا
+// (لا مسار آخر ينشئ صفاً بواسطة هذا المسار؛ الحتمي وAI_PROPOSED يُنشآن فقط
+// من مسار التوليد /court-report/draft).
+export const courtReportTableInputSchema = z.object({
+  courtReportTaskId: z.string().nullable().optional(),
+  placement: z.enum(COURT_REPORT_TABLE_PLACEMENTS).default("TASK"),
+  order: z.number().int().min(0).optional(),
+  title: z.string().min(1, "عنوان الجدول مطلوب"),
+  subtitle: z.string().nullable().optional(),
+  columns: z.array(courtReportTableColumnSchema).min(1, "عمود واحد على الأقل"),
+  rows: z.array(courtReportTableRowSchema).min(1, "صف واحد على الأقل"),
+  basisNote: z.string().nullable().optional(),
+});
+export type CourtReportTableInput = z.infer<typeof courtReportTableInputSchema>;
+
+export const updateCourtReportTableSchema = z.object({
+  title: z.string().min(1).optional(),
+  subtitle: z.string().nullable().optional(),
+  columns: z.array(courtReportTableColumnSchema).min(1).optional(),
+  rows: z.array(courtReportTableRowSchema).min(1).optional(),
+  basisNote: z.string().nullable().optional(),
+  order: z.number().int().min(0).optional(),
+  provenance: z.enum(PROVENANCE_STATES).optional(),
+});
+export type UpdateCourtReportTableInput = z.infer<typeof updateCourtReportTableSchema>;
+
+// --- الموديول 4: الاعتراضات وردود الخبير (ReportObjection) ---
+export const REPORT_OBJECTION_PARTY_ROLES = ["CLAIMANT", "RESPONDENT"] as const;
+export type ReportObjectionPartyRole = (typeof REPORT_OBJECTION_PARTY_ROLES)[number];
+
+export const reportObjectionInputSchema = z.object({
+  partyRole: z.enum(REPORT_OBJECTION_PARTY_ROLES),
+  submittedOnBehalfOfLabel: z.string().min(1, "صفة مقدّم الاعتراض مطلوبة (مثال: وكيل المدعيين)"),
+  objectionMemoDate: z.string().datetime().optional().nullable(),
+  order: z.number().int().min(0).optional(),
+  objectionText: z.string().min(1, "نص الاعتراض مطلوب"),
+  linkedTaskIndex: z.number().int().min(0).nullable().optional(),
+});
+export type ReportObjectionInput = z.infer<typeof reportObjectionInputSchema>;
+
+export const updateReportObjectionSchema = z.object({
+  submittedOnBehalfOfLabel: z.string().min(1).optional(),
+  objectionMemoDate: z.string().datetime().optional().nullable(),
+  order: z.number().int().min(0).optional(),
+  objectionText: z.string().min(1).optional(),
+  objectionProvenance: z.enum(PROVENANCE_STATES).optional(),
+  responseText: z.string().optional().nullable(),
+  responseProvenance: z.enum(PROVENANCE_STATES).optional(),
+  linkedTaskIndex: z.number().int().min(0).nullable().optional(),
+});
+export type UpdateReportObjectionInput = z.infer<typeof updateReportObjectionSchema>;

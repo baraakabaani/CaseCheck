@@ -20,7 +20,13 @@ function safeParseJson<T>(json: string | null | undefined, fallback: T): T {
   }
 }
 
-type SectionKey = "introduction" | "mandateSummary" | "partiesOverview" | "proceduralHistory" | "documentInventory";
+type SectionKey =
+  | "introduction"
+  | "mandateSummary"
+  | "partiesOverview"
+  | "proceduralHistory"
+  | "documentInventory"
+  | "scopeNarrative";
 
 export function ReportPreliminarySections({
   caseId,
@@ -35,6 +41,7 @@ export function ReportPreliminarySections({
     partiesOverview: report.partiesOverview ?? "",
     proceduralHistory: report.proceduralHistory ?? "",
     documentInventory: report.documentInventory ?? "",
+    scopeNarrative: report.scopeNarrative ?? "",
   });
   const [saving, setSaving] = useState<SectionKey | null>(null);
 

@@ -92,13 +92,31 @@ export const PROVENANCE_TONE: Record<ProvenanceState, { badge: string; border: s
   },
 };
 
+// أسماء الأقسام كما تُعرَض للخبير — تُطابق تسميات التقرير المرجعي (بعض
+// الأسماء أُعيدت تسميتها هنا لتطابقه: introduction/mandateSummary)، مع
+// إبقاء اسم الحقل نفسه في قاعدة البيانات وبقية الكود كما هو دون تغيير.
 export const REPORT_SECTION_LABELS = {
-  introduction: "المقدمة",
-  mandateSummary: "ملخص المأمورية",
+  introduction: "موضوع الدعوى",
+  mandateSummary: "مهام الخبير المنتدب",
   partiesOverview: "الأطراف وصفاتهم",
   proceduralHistory: "الإجراءات",
   documentInventory: "حافظة المستندات",
+  scopeNarrative: "نطاق الفحص",
 } as const;
+
+// مصدر أرقام جدول مالي (CourtReportTable.computation) — لا علاقة له بـ
+// ProvenanceState (ذاك حالة مراجعة الخبير، وهذا مصدر الأرقام نفسها).
+export const TABLE_COMPUTATION_LABELS: Record<"DETERMINISTIC" | "AI_PROPOSED" | "MANUAL", string> = {
+  DETERMINISTIC: "محسوب آلياً من مستند حقيقي",
+  AI_PROPOSED: "مقترح من الذكاء الاصطناعي — تحقق من كل رقم",
+  MANUAL: "أُدخل يدوياً",
+};
+
+export const TABLE_COMPUTATION_TONE: Record<"DETERMINISTIC" | "AI_PROPOSED" | "MANUAL", string> = {
+  DETERMINISTIC: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  AI_PROPOSED: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  MANUAL: "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+};
 
 export const REPORT_TASK_FIELD_LABELS = {
   taskText: "نص المهمة (من المأمورية)",

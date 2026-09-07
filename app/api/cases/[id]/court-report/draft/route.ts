@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { CourtReportTable } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getClientApiKeysFromRequest } from "@/lib/ai-client";
 import { buildReportAggregate } from "@/lib/reports/report-aggregator";
 import { draftCourtReport } from "@/lib/report-draft-ai";
 import { computeLiquidation } from "@/lib/reports/liquidation";
+import { buildDeterministicTables, type ProposedTable } from "@/lib/reports/financial-tables";
+import { buildConclusionIntroText, buildConclusionClosingText } from "@/lib/reports/report-sections";
+import { getExpertProfile } from "@/lib/queries";
 import { generateCourtReportDraftSchema } from "@/lib/hub-schemas";
 
 interface RouteParams {
@@ -16,6 +20,7 @@ const PRELIMINARY_FIELDS = [
   "partiesOverview",
   "proceduralHistory",
   "documentInventory",
+  "scopeNarrative",
 ] as const;
 
 /** "معتمد من الخبير" يجب أن يعني فعلاً وجود نص اعتمده الخبير — صف مُرحَّل
@@ -23,6 +28,36 @@ const PRELIMINARY_FIELDS = [
  * فارغ فعلياً؛ معاملة ذلك كـ"معتمد" كان يمنع توليده للأبد. */
 function hasRealContent(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+/** نفس قاعدة hasRealContent مطبَّقة على جدول: صف واحد حقيقي على الأقل يحمل
+ * خلية غير فارغة — "معتمد" على جدول فارغ فعلياً لا يعني شيئاً. */
+function hasRealTableContent(table: { rowsJson: string }): boolean {
+  try {
+    const rows = JSON.parse(table.rowsJson) as { cells: string[] }[];
+    return rows.some((r) => r.cells.some((c) => c.trim().length > 0));
+  } catch {
+    return false;
+  }
+}
+
+/** لا يُعاد إنشاء جدول اعتمده الخبير فعلاً أو أدخله يدوياً (MANUAL) عند
+ * إعادة التوليد — نفس منطق حماية "رأي الخبرة" لكل مهمة، مُطبَّقاً على
+ * الجداول. جدول AI_DRAFT/AI_PROPOSED أو DETERMINISTIC لم يُعتمد بعد يُستبدَل
+ * بحرية عند كل إعادة توليد لنفس المهمة. */
+function isTablePreserved(table: { provenance: string; computation: string; rowsJson: string }): boolean {
+  if (table.computation === "MANUAL") return true;
+  return table.provenance === "EXPERT_CERTIFIED" && hasRealTableContent(table);
+}
+
+function hasRealConclusionItems(itemsJson: string | null | undefined): boolean {
+  if (!itemsJson) return false;
+  try {
+    const items = JSON.parse(itemsJson) as unknown[];
+    return items.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 // موديول 4 — توليد/إعادة توليد التقرير القضائي: يجمع البيانات الحتمية عبر
@@ -56,9 +91,27 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const existingReport = await prisma.courtReport.findUnique({
     where: { caseId },
-    include: { tasks: true },
+    include: { tasks: true, tables: true },
   });
   const existingTaskByIndex = new Map((existingReport?.tasks ?? []).map((t) => [t.taskIndex, t]));
+  const existingTablesByTaskId = new Map<string | null, CourtReportTable[]>();
+  for (const table of existingReport?.tables ?? []) {
+    const key = table.courtReportTaskId;
+    const list = existingTablesByTaskId.get(key) ?? [];
+    list.push(table);
+    existingTablesByTaskId.set(key, list);
+  }
+
+  // بنود الخلاصة (ثامناً) — نسخة حرفية من "رأي الخبرة" المعتمَد فعلاً لكل
+  // مهمة فقط؛ مهمة لم يُعتمد رأيها بعد لا تظهر كبند في الخلاصة (لا استنتاج
+  // نهائي بلا اعتماد خبير حقيقي وراءه).
+  const certifiedVerdicts: string[] = [];
+  for (const t of aggregate.tasks) {
+    const existing = existingTaskByIndex.get(t.taskIndex);
+    if (existing?.expertVerdictProvenance === "EXPERT_CERTIFIED" && hasRealContent(existing.expertVerdict)) {
+      certifiedVerdicts.push(existing.expertVerdict);
+    }
+  }
 
   const tasksToGenerate = aggregate.tasks.filter((t) => {
     const existing = existingTaskByIndex.get(t.taskIndex);
@@ -67,8 +120,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   });
 
   const clientKeys = getClientApiKeysFromRequest(req);
-  const outcome = await draftCourtReport(aggregate, tasksToGenerate, clientKeys);
+  const deterministicTables = await buildDeterministicTables(aggregate);
+  const expertProfile = await getExpertProfile();
+  const outcome = await draftCourtReport(aggregate, tasksToGenerate, clientKeys, deterministicTables.byTaskIndex);
   const taskResultByIndex = new Map(outcome.result.taskAnalyses.map((t) => [Number(t.taskId), t]));
+  const taskTablesByIndex = new Map(outcome.result.taskTables.map((t) => [t.taskIndex, t.tables]));
 
   // كل كتلة تمهيدية مُنتَجة عبر المحرك الحتمي في المحرك الاحتياطي (نص
   // حقيقي مُجمَّع من سجلات النظام، لا نص ذكاء اصطناعي) تُوسَم EXTRACT؛
@@ -112,6 +168,33 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       delete reportData.settlementBeneficiary;
       delete reportData.settlementNarrative;
       delete reportData.settlementNarrativeProvenance;
+    }
+
+    // ثامناً: الخلاصة — حقل provenance واحد يحرس ثلاثة أعمدة معاً (نفس نمط
+    // settlementNarrativeProvenance أعلاه). المحتوى نفسه بالكامل مجمَّع
+    // حتمياً هنا (قالب ثابت + بنود منقولة حرفياً من "رأي خبرة" معتمَد فعلاً)
+    // — provenance الافتراضي EXTRACT لا AI_DRAFT، لكن بوابة التصدير (لاحقاً)
+    // تشترط EXPERT_CERTIFIED صراحةً على هذا الحقل بعينه بصرف النظر عن ذلك،
+    // لأن الخلاصة أهم قسم في التقرير قانونياً ولا يكفي أن يكون محتواها
+    // "حقيقياً" — يجب أن يراجعها الخبير كوحدة واحدة مجمَّعة قبل الاعتماد.
+    if (
+      existingReport?.conclusionProvenance === "EXPERT_CERTIFIED" &&
+      hasRealConclusionItems(existingReport?.conclusionItemsJson)
+    ) {
+      preservedCertifiedFields++;
+    } else {
+      reportData.conclusionIntro = buildConclusionIntroText(aggregate.basics);
+      reportData.conclusionItemsJson = JSON.stringify(certifiedVerdicts);
+      reportData.conclusionClosing = buildConclusionClosingText(
+        expertProfile && expertProfile.expertName.trim()
+          ? {
+              expertTitle: expertProfile.expertTitle,
+              expertName: expertProfile.expertName,
+              registrationNumber: expertProfile.registrationNumber,
+            }
+          : null,
+      );
+      reportData.conclusionProvenance = "EXTRACT";
     }
 
     const upserted = await tx.courtReport.upsert({
@@ -167,10 +250,71 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
           : {}),
       };
 
-      await tx.courtReportTask.upsert({
+      const upsertedTask = await tx.courtReportTask.upsert({
         where: { courtReportId_taskIndex: { courtReportId: upserted.id, taskIndex: task.taskIndex } },
         create: { courtReportId: upserted.id, taskIndex: task.taskIndex, ...taskData },
         update: taskData,
+      });
+
+      // جداول هذه المهمة: يُستبدَل ما لم يُعتمَد أو يُدخَل يدوياً فقط —
+      // هذا الفرع من الحلقة أصلاً لا يُنفَّذ إلا لمهمة أُعيد توليدها أو
+      // أُنشئت للمرة الأولى (المهام المعتمدة تُكمِل الحلقة أعلاه قبل الوصول
+      // هنا)، فلا حاجة لفحص "wasRegenerated" مرة أخرى.
+      const existingTaskTables = existingTablesByTaskId.get(upsertedTask.id) ?? [];
+      const tablesToDelete = existingTaskTables.filter((t) => !isTablePreserved(t));
+      if (tablesToDelete.length > 0) {
+        await tx.courtReportTable.deleteMany({ where: { id: { in: tablesToDelete.map((t) => t.id) } } });
+      }
+      const preservedTableCount = existingTaskTables.length - tablesToDelete.length;
+      const freshTables = taskTablesByIndex.get(task.taskIndex) ?? [];
+      for (let i = 0; i < freshTables.length; i++) {
+        const table: ProposedTable = freshTables[i];
+        await tx.courtReportTable.create({
+          data: {
+            courtReportId: upserted.id,
+            courtReportTaskId: upsertedTask.id,
+            placement: "TASK",
+            order: preservedTableCount + i,
+            title: table.title,
+            subtitle: table.subtitle ?? null,
+            columnsJson: JSON.stringify(table.columns),
+            rowsJson: JSON.stringify(table.rows),
+            basisNote: table.basisNote,
+            computation: table.computation,
+            sourceDocumentIds: JSON.stringify(table.sourceDocumentIds),
+            computationJson: table.computationJson ?? null,
+          },
+        });
+      }
+    }
+
+    // جداول نطاق الفحص (خامساً، على مستوى التقرير لا مهمة بعينها) — نفس
+    // منطق استبدال جداول المهام أعلاه، بمفتاح courtReportTaskId: null.
+    // فارغة دوماً في هذا الإصدار (انظر تعليق DeterministicTablesResult في
+    // lib/reports/financial-tables.ts) لكن الكود عام لأي إضافة مستقبلية.
+    const existingScopeTables = existingTablesByTaskId.get(null) ?? [];
+    const scopeTablesToDelete = existingScopeTables.filter((t) => !isTablePreserved(t));
+    if (scopeTablesToDelete.length > 0) {
+      await tx.courtReportTable.deleteMany({ where: { id: { in: scopeTablesToDelete.map((t) => t.id) } } });
+    }
+    const preservedScopeTableCount = existingScopeTables.length - scopeTablesToDelete.length;
+    for (let i = 0; i < deterministicTables.scopeTables.length; i++) {
+      const table = deterministicTables.scopeTables[i];
+      await tx.courtReportTable.create({
+        data: {
+          courtReportId: upserted.id,
+          courtReportTaskId: null,
+          placement: "SCOPE",
+          order: preservedScopeTableCount + i,
+          title: table.title,
+          subtitle: table.subtitle ?? null,
+          columnsJson: JSON.stringify(table.columns),
+          rowsJson: JSON.stringify(table.rows),
+          basisNote: table.basisNote,
+          computation: table.computation,
+          sourceDocumentIds: JSON.stringify(table.sourceDocumentIds),
+          computationJson: table.computationJson ?? null,
+        },
       });
     }
 
@@ -186,7 +330,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
     return tx.courtReport.findUniqueOrThrow({
       where: { id: upserted.id },
-      include: { tasks: { orderBy: { taskIndex: "asc" } } },
+      include: {
+        tasks: { orderBy: { taskIndex: "asc" } },
+        tables: { orderBy: [{ placement: "asc" }, { order: "asc" }] },
+      },
     });
   });
 
@@ -200,6 +347,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       partiesOverview: report.partiesOverview,
       proceduralHistory: report.proceduralHistory,
       documentInventory: report.documentInventory,
+      scopeNarrative: report.scopeNarrative,
     },
     taskAnalyses: report.tasks.map((t) => ({
       taskId: String(t.taskIndex),
@@ -221,5 +369,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     mode: outcome.mode,
     warning: outcome.warning ?? null,
     preservedCertifiedFields,
+    financialParsingWarnings: deterministicTables.warnings,
   });
 }

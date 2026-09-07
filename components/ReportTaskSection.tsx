@@ -23,11 +23,12 @@ import {
 } from "@/components/ui/dialog";
 import { FileText, Plus, X, Quote } from "lucide-react";
 import { ProvenanceField } from "@/components/ProvenanceBadge";
+import { ReportTaskTables } from "@/components/ReportTaskTables";
 import { REPORT_TASK_FIELD_LABELS } from "@/lib/case-hub-labels";
 import { buildClientApiKeyHeaders } from "@/lib/client-api-key";
 import { nextProvenance } from "@/lib/reports/provenance";
 import type { ProvenanceState } from "@/lib/hub-schemas";
-import type { CourtReportTaskDetail, DocumentDetail } from "@/lib/queries";
+import type { CourtReportTableDetail, CourtReportTaskDetail, DocumentDetail } from "@/lib/queries";
 
 function safeParseJson<T>(json: string | null | undefined, fallback: T): T {
   if (!json) return fallback;
@@ -43,11 +44,15 @@ type QuoteTargetField = "claimantPosition" | "respondentPosition" | "forensicAna
 export function ReportTaskSection({
   caseId,
   task,
+  allTasks,
+  tables,
   documents,
   onChanged,
 }: {
   caseId: string;
   task: CourtReportTaskDetail;
+  allTasks: CourtReportTaskDetail[];
+  tables: CourtReportTableDetail[];
   documents: DocumentDetail[];
   onChanged: () => void;
 }) {
@@ -289,6 +294,15 @@ export function ReportTaskSection({
         value={task.missingDocsImpact ?? ""}
         provenance="EXTRACT"
         readOnly
+      />
+
+      <ReportTaskTables
+        caseId={caseId}
+        task={task}
+        allTasks={allTasks}
+        tables={tables}
+        documents={documents}
+        onChanged={onChanged}
       />
 
       <div className="rounded-md border p-3">

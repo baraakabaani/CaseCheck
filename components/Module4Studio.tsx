@@ -31,6 +31,8 @@ import { ReportPreliminarySections } from "@/components/ReportPreliminarySection
 import { ReportTaskSection } from "@/components/ReportTaskSection";
 import { ForensicLiquidationTable } from "@/components/ForensicLiquidationTable";
 import { ReportDocumentsIndex } from "@/components/ReportDocumentsIndex";
+import { ReportObjectionsPanel } from "@/components/ReportObjectionsPanel";
+import { ReportConclusionSection } from "@/components/ReportConclusionSection";
 import type { CaseDetail } from "@/lib/queries";
 import type { CourtReportStatus } from "@/lib/hub-schemas";
 import type { DocumentInventory } from "@/lib/reports/report-aggregator";
@@ -59,7 +61,7 @@ export function Module4Studio({ caseDetail }: { caseDetail: CaseDetail }) {
   const [exporting, setExporting] = useState(false);
 
   const status = (report?.status as CourtReportStatus) ?? "DRAFT";
-  const gate = isExportBlocked(tasks);
+  const gate = isExportBlocked(tasks, report ? { tables: report.tables, objections: report.objections, report } : undefined);
   const liquidation = computeLiquidation(tasks);
 
   function jumpToTask(taskId: string) {
@@ -227,17 +229,40 @@ export function Module4Studio({ caseDetail }: { caseDetail: CaseDetail }) {
       {gate.blocked && tasks.length > 0 && (
         <div className="flex items-start gap-2 rounded-md border border-purple-200 bg-purple-50 p-3 text-sm text-purple-800 dark:border-purple-900 dark:bg-purple-950/40 dark:text-purple-300">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <div>
-            لا يمكن التصدير أو اعتماد التقرير قبل اعتماد «رأي الخبرة» في كل مهمة — المهام غير
-            المعتمدة:{" "}
-            {gate.uncertifiedTaskIndexes.map((i, idx) => (
-              <span key={i}>
-                <button type="button" className="underline underline-offset-2" onClick={() => jumpToTask(tasks.find((t) => t.taskIndex === i)?.id ?? "")}>
-                  مهمة {i + 1}
-                </button>
-                {idx < gate.uncertifiedTaskIndexes.length - 1 ? "، " : ""}
+          <div className="flex flex-col gap-1">
+            <span>لا يمكن التصدير أو اعتماد التقرير قبل اعتماد ما يلي:</span>
+            {gate.uncertifiedTaskIndexes.length > 0 && (
+              <span>
+                رأي الخبرة في:{" "}
+                {gate.uncertifiedTaskIndexes.map((i, idx) => (
+                  <span key={i}>
+                    <button type="button" className="underline underline-offset-2" onClick={() => jumpToTask(tasks.find((t) => t.taskIndex === i)?.id ?? "")}>
+                      مهمة {i + 1}
+                    </button>
+                    {idx < gate.uncertifiedTaskIndexes.length - 1 ? "، " : ""}
+                  </span>
+                ))}
               </span>
-            ))}
+            )}
+            {gate.uncertifiedTableIds.length > 0 && (
+              <span>{gate.uncertifiedTableIds.length} جدول مالي غير معتمَد (أو بلا صفوف فعلية).</span>
+            )}
+            {gate.uncertifiedObjectionIds.length > 0 && (
+              <span>
+                <button type="button" className="underline underline-offset-2" onClick={() => setActiveTab("objections")}>
+                  {gate.uncertifiedObjectionIds.length} اعتراض بلا رد معتمَد
+                </button>
+                .
+              </span>
+            )}
+            {gate.conclusionUncertified && (
+              <span>
+                <button type="button" className="underline underline-offset-2" onClick={() => setActiveTab("conclusion")}>
+                  الخلاصة (ثامناً) غير معتمَدة بعد
+                </button>
+                .
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -262,7 +287,9 @@ export function Module4Studio({ caseDetail }: { caseDetail: CaseDetail }) {
           <TabsList className="flex-wrap">
             <TabsTrigger value="preliminary">الأقسام التمهيدية</TabsTrigger>
             <TabsTrigger value="tasks">البحث والدراسة ({tasks.length})</TabsTrigger>
-            <TabsTrigger value="settlement">الخلاصة وتصفية الحساب</TabsTrigger>
+            <TabsTrigger value="settlement">تصفية الحساب</TabsTrigger>
+            <TabsTrigger value="objections">العرض على الأطراف ({report.objections.length})</TabsTrigger>
+            <TabsTrigger value="conclusion">الخلاصة</TabsTrigger>
             <TabsTrigger value="documents">حافظة المستندات</TabsTrigger>
           </TabsList>
 
@@ -319,6 +346,8 @@ export function Module4Studio({ caseDetail }: { caseDetail: CaseDetail }) {
                             <ReportTaskSection
                               caseId={caseDetail.id}
                               task={task}
+                              allTasks={tasks}
+                              tables={(report?.tables ?? []).filter((t) => t.courtReportTaskId === task.id)}
                               documents={documents}
                               onChanged={() => router.refresh()}
                             />
@@ -340,6 +369,18 @@ export function Module4Studio({ caseDetail }: { caseDetail: CaseDetail }) {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="objections">
+            <ReportObjectionsPanel caseId={caseDetail.id} report={report} tasks={tasks} onChanged={() => router.refresh()} />
+          </TabsContent>
+
+          <TabsContent value="conclusion">
+            <Card>
+              <CardContent>
+                <ReportConclusionSection caseId={caseDetail.id} report={report} onChanged={() => router.refresh()} />
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="documents">

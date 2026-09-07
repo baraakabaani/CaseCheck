@@ -33,6 +33,8 @@ export function offlineDraftPreliminary(aggregate: ReportAggregate): {
       partiesOverview: buildPartiesOverviewText(aggregate.basics, aggregate.parties, aggregate.attendees),
       proceduralHistory: buildProceduralTimelineText(aggregate.timeline),
       documentInventory: buildDocumentInventoryText(aggregate.inventory),
+      scopeNarrative:
+        "لم تُصَغ فقرة نطاق الفحص تلقائياً (لا يوجد مفتاح ذكاء اصطناعي مُهيأ) — اكتبها يدوياً؛ الجداول المالية لكل مهمة (إن وُجدت مستندات كشف حساب مهيكلة) حُسبت حتمياً بمعزل عن هذا القسم في كل الأحوال.",
     },
     settlement: {
       beneficiary: "",

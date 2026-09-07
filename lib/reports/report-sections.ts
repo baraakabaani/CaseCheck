@@ -182,6 +182,24 @@ export function buildMissingDocsImpactText(task: AggregatedTask): string {
   return lines.join("\n");
 }
 
+/** ثامناً: الخلاصة — الفقرة الافتتاحية والختامية نصّان قالبيّان ثابتان
+ * (EXTRACT، لا AI_DRAFT) لأنهما صيغة شكلية رسمية لا تحليل فيها، تماماً كمنطق
+ * buildMissingDocsImpactText؛ البنود المرقّمة نفسها (conclusionItemsJson)
+ * تُبنى في مسار التوليد من "رأي الخبرة" المعتمَد لكل مهمة، لا من هنا. */
+export function buildConclusionIntroText(basics: ReportAggregateBasics): string {
+  return `بناءً على ما تقدَّم من دراسة وتمحيص لكافة المستندات والمذكرات المقدَّمة من طرفي الدعوى، ووفقاً لما جاء بالمأمورية المكلَّف بها الخبير في الدعوى رقم ${basics.caseNumber}، فقد توصَّل الخبير إلى الخلاصة التالية:`;
+}
+
+export function buildConclusionClosingText(expertProfile: { expertTitle: string; expertName: string; registrationNumber: string } | null): string {
+  const signatureLines =
+    expertProfile && expertProfile.expertName.trim()
+      ? [expertProfile.expertTitle, expertProfile.expertName, expertProfile.registrationNumber ? `رقم القيد: ${expertProfile.registrationNumber}` : null]
+          .filter(Boolean)
+          .join("\n")
+      : "لم يُعرَّف اسم الخبير بعد — أضفه من زر «الملف التعريفي للخبير» أعلى الصفحة قبل الاعتماد النهائي.";
+  return `وعليه، يرفع الخبير المنتدب هذا التقرير لعدالة المحكمة الموقرة لتقضي فيه بما تراه محققاً لوجه الحق والعدالة.\n\n${signatureLines}`;
+}
+
 export function buildPartyClaimsBlock(claims: PartyClaimsSnapshot): string {
   const lines: string[] = [];
 

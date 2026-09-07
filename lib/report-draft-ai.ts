@@ -28,17 +28,27 @@ import { offlineDraftPreliminary, offlineDraftTask } from "./reports/offline-rep
 import {
   reportPreliminaryAiResultSchema,
   reportTaskAiResultSchema,
+  reportTaskTablesAiResultSchema,
   type ReportPreliminarySections,
   type ReportSettlementNarrative,
   type ReportTaskAnalysis,
+  type ReportTaskTablesAiResult,
 } from "./reports/report-draft-schemas";
+import type { ProposedTable } from "./reports/financial-tables";
+import { FINANCIAL_MATERIAL_KEYWORDS } from "./financial/keywords";
 import type { AggregatedTask, ReportAggregate } from "./reports/report-aggregator";
 import type { DocCategory } from "./schemas";
+
+export interface TaskTablesResult {
+  taskIndex: number;
+  tables: ProposedTable[];
+}
 
 export interface ReportDraftResult {
   preliminarySections: ReportPreliminarySections;
   taskAnalyses: ReportTaskAnalysis[];
   settlement: ReportSettlementNarrative;
+  taskTables: TaskTablesResult[];
 }
 
 export interface ReportDraftOutcome {
@@ -95,13 +105,14 @@ const PRELIMINARY_SYSTEM_PROMPT = `أنت خبير حسابي قضائي متم�
 3. partiesOverview: فقرة سردية عن الأطراف وصفاتهم، تكملة لِما هو معطى في "الأطراف وصفاتهم" أدناه لا إعادة له حرفياً.
 4. proceduralHistory: فقرة سردية تمهيدية فوق "الجدول الزمني للإجراءات" المعطى لك — تعليق وربط بين الأحداث، لا إعادة سرد كل حدث فيه (الجدول نفسه سيُعرض كاملاً في التقرير بعد فقرتك مباشرة).
 5. documentInventory: فقرة سردية تمهيدية فوق "جرد المستندات" المعطى لك، بنفس المنطق.
+6. scopeNarrative: فقرة "نطاق الفحص" — صف منهجية عمل الخبير وما فحصه من مستندات عموماً (لا تفصيلاً في مستوى كل مهمة، لكل مهمة تحليلها الخاص لاحقاً)، تمهيداً لجداول التحليل المالي التفصيلي لكل مهمة التي ستُعرض بعدها.
 
 خلاصة التصفية (settlement):
 - beneficiary: صِف نصياً أي الطرفين يبدو أنه المستفيد من ترجيح مبدئي للمطالبات مقابل المقاصات المذكورة في سياق مواقف الأطراف (أو اذكر أنه لم يتضح بعد إن كانت الأرقام غير كافية) — لا تذكر رقماً هنا، الأرقام تُحسب لاحقاً من كل مهمة على حدة.
 - summaryNarrative: فقرة ختامية عامة تمهّد لجدول التصفية دون ذكر أي رقم إجمالي محدَّد.
 
 لا تخترع أي واقعة أو تاريخ أو مستند أو مبلغ غير معطى لك في السياق. أجب بالعربية الفصحى. يجب أن يكون ردك بصيغة JSON صالحة فقط، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown، وفق المخطط التالي بالضبط:
-{"preliminarySections": {"introduction": "string", "mandateSummary": "string", "partiesOverview": "string", "proceduralHistory": "string", "documentInventory": "string"}, "settlement": {"beneficiary": "string", "summaryNarrative": "string"}}`;
+{"preliminarySections": {"introduction": "string", "mandateSummary": "string", "partiesOverview": "string", "proceduralHistory": "string", "documentInventory": "string", "scopeNarrative": "string"}, "settlement": {"beneficiary": "string", "summaryNarrative": "string"}}`;
 
 async function callAiForPreliminary(
   resolved: ResolvedAiKey,
@@ -173,14 +184,8 @@ const TASK_SYSTEM_PROMPT = `أنت خبير حسابي قضائي متمرس ت�
 لا تخترع أي معلومة أو مستند أو رقم لا أصل له فيما عُرض عليك. أجب بالعربية الفصحى. يجب أن يكون ردك بصيغة JSON صالحة فقط، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown، وفق المخطط التالي بالضبط:
 {"taskId": "string", "claimantArguments": "string", "respondentArguments": "string", "forensicStudy": "string", "missingDocsImpact": "string", "tentativeFinding": "string", "claimantAmount": "number|null", "respondentOffset": "number|null", "amountNote": "string|null"}`;
 
-async function callAiForTask(
-  resolved: ResolvedAiKey,
-  aggregate: ReportAggregate,
-  task: AggregatedTask,
-): Promise<ReportTaskAnalysis> {
-  const client = createAiClient(resolved);
-
-  const exhibitDigests = task.linkedDocumentIds
+function buildExhibitDigestsBlock(aggregate: ReportAggregate, task: AggregatedTask): string {
+  return task.linkedDocumentIds
     .map((docId) => aggregate.documentsById.get(docId))
     .filter((d): d is NonNullable<typeof d> => Boolean(d))
     .map((d) => {
@@ -197,6 +202,16 @@ async function callAiForTask(
       return `[معرف المستند: ${d.id} | الملف: ${d.fileName}] ${digest.text}`;
     })
     .join("\n\n");
+}
+
+async function callAiForTask(
+  resolved: ResolvedAiKey,
+  aggregate: ReportAggregate,
+  task: AggregatedTask,
+): Promise<ReportTaskAnalysis> {
+  const client = createAiClient(resolved);
+
+  const exhibitDigests = buildExhibitDigestsBlock(aggregate, task);
 
   const userContent = `${buildCaseHeaderBlock(aggregate)}
 
@@ -246,6 +261,164 @@ ${buildPartyClaimsBlock(aggregate.partyClaims)}
 }
 
 // ---------------------------------------------------------------------------
+// جداول مهمة واحدة — النموذج يختار من جداول حتمية جاهزة (لا يعيد حسابها
+// أبداً)، أو يقترح جداول كاملة فقط حين لا يوجد أي مرشح حتمي لهذه المهمة.
+// ---------------------------------------------------------------------------
+
+const TASK_TABLES_SELECT_SYSTEM_PROMPT = `أنت خبير حسابي قضائي. لديك جداول مالية حُسبت آلياً وحتمياً (بجمع/طرح مباشر على معاملات حقيقية من كشف حساب فعلي مُحلَّل) خاصة بمهمة واحدة من مهام مأمورية الخبرة.
+
+مهمتك تنحصر في:
+1. اختيار الجداول المفيدة فعلياً لعرض بحث هذه المهمة تحديداً بمفتاحها (candidateKey) كما وردت لك — استبعد أي جدول غير ذي صلة بموضوع المهمة، وقد تستبعدها كلها إن رأيت ذلك.
+2. اقتراح عنوان مناسب لكل جدول تختاره (يمكنك إبقاء العنوان المعطى كما هو حرفياً إن كان مناسباً).
+3. ملاحظة أساس إضافية اختيارية إن رأيت فائدة توضيحية (وإلا أعدها null).
+
+قاعدة صارمة لا استثناء فيها: هذه الجداول أرقامها وصفوفها وأعمدتها نهائية ولا تُغيَّر بأي حال — لا تكتب أي رقم أو عمود أو صف في ردك على الإطلاق، فقط candidateKey + title + basisNote.
+
+أجب بالعربية الفصحى. يجب أن يكون ردك بصيغة JSON صالحة فقط، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown، وفق المخطط التالي بالضبط:
+{"taskId": "string", "selectedCandidates": [{"candidateKey": "string", "title": "string", "basisNote": "string|null"}], "proposedTables": []}`;
+
+const TASK_TABLES_PROPOSE_SYSTEM_PROMPT = `أنت خبير حسابي قضائي. لا توجد جداول مالية محسوبة حتمياً لهذه المهمة (لا تتوفر مستندات كشف حساب/دفتر أستاذ مهيكل مرتبط بها). سيُعرض عليك نص المهمة وملخصات المستندات المرتبطة بها.
+
+إن كانت هذه المواد تتضمن أرقاماً مالية واضحة وصريحة يمكن تنظيمها في جدول (مبالغ مطالبة/مقاصة مذكورة صراحة في مستند، بنود فاتورة، إلخ)، اقترح حتى 3 جداول.
+
+قاعدة الأرقام (صارمة، لا استثناء): كل رقم تكتبه في أي جدول يجب أن يكون له أصل صريح فيما عُرض عليك أعلاه — رقم مذكور حرفياً في مستند أو نص المهمة. إن لم تتوافر أرقام موثوقة كافية لجدول ذي معنى، أعد proposedTables فارغة تماماً — لا تخترع جدولاً شكلياً بلا مضمون رقمي حقيقي، ولا تُقدِّر أو تُقرِّب رقماً غير مذكور صراحة.
+
+أجب بالعربية الفصحى. يجب أن يكون ردك بصيغة JSON صالحة فقط، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown، وفق المخطط التالي بالضبط:
+{"taskId": "string", "selectedCandidates": [], "proposedTables": [{"title": "string", "subtitle": "string|null", "columns": [{"key": "string", "label": "string", "align": "start|center|end"}], "rows": [{"cells": ["string"], "isTotal": false}], "basisNote": "string"}]}`;
+
+/** "هل هذه المهمة ذات طبيعة مالية تستحق طلب اقتراح/اختيار جداول؟" — تُستدعى
+ * قبل إهدار طلب ذكاء اصطناعي إضافي على مهمة لا صلة لها بأرقام على الإطلاق
+ * (مثال: مهمة إجرائية بحتة). تحسب "نعم" إن وُجدت مرشحات حتمية جاهزة، أو
+ * مستند مرتبط من نوع كشف حساب (xlsx/csv) حتى لو تعذّر تحليله حتمياً، أو
+ * تطابق كلمة مفتاحية مالية في نص المهمة نفسه. */
+export function taskHasFinancialMaterial(
+  aggregate: ReportAggregate,
+  task: AggregatedTask,
+  hasCandidates: boolean,
+): boolean {
+  if (hasCandidates) return true;
+  const hasStructuredDoc = task.linkedDocumentIds.some((docId) => {
+    const doc = aggregate.documentsById.get(docId);
+    return doc?.fileKind === "xlsx" || doc?.fileKind === "csv";
+  });
+  if (hasStructuredDoc) return true;
+  return FINANCIAL_MATERIAL_KEYWORDS.some((kw) => task.taskText.includes(kw));
+}
+
+async function callAiForTaskTables(
+  resolved: ResolvedAiKey,
+  aggregate: ReportAggregate,
+  task: AggregatedTask,
+  candidates: ProposedTable[],
+): Promise<ReportTaskTablesAiResult> {
+  const client = createAiClient(resolved);
+  const hasCandidates = candidates.length > 0;
+
+  const userContent = hasCandidates
+    ? `${buildCaseHeaderBlock(aggregate)}
+
+=====
+
+المهمة محل البحث (taskId: ${String(task.taskIndex)}):
+${task.taskText}
+
+=====
+
+الجداول المحسوبة حتمياً المتاحة لهذه المهمة (لا تُعِد ذكر أرقامها، فقط اختر):
+${candidates
+  .map(
+    (c) =>
+      `مفتاح: ${c.key}\nالعنوان المقترح افتراضياً: ${c.title}\nالأعمدة: ${c.columns.map((col) => col.label).join(" | ")}\nعدد الصفوف: ${c.rows.length}\nملاحظة الأساس: ${c.basisNote}`,
+  )
+  .join("\n---\n")}
+
+=====
+
+اختر ما هو مناسب من الجداول أعلاه وفق التعليمات.`
+    : `${buildCaseHeaderBlock(aggregate)}
+
+=====
+
+المهمة محل البحث (taskId: ${String(task.taskIndex)}):
+${task.taskText}
+
+=====
+
+المستندات المرتبطة بهذه المهمة:
+${buildExhibitDigestsBlock(aggregate, task) || "لا توجد مستندات مرتبطة بهذه المهمة حتى الآن."}
+
+=====
+
+اقترح جداول وفق التعليمات إن توفرت أرقام موثوقة صريحة، وإلا أعد proposedTables فارغة.`;
+
+  const completion = await client.chat.completions.create({
+    model: resolved.model,
+    temperature: 0.15,
+    max_tokens: hasCandidates ? 900 : 1400,
+    reasoning_effort: resolved.provider === "gemini" ? "low" : undefined,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: hasCandidates ? TASK_TABLES_SELECT_SYSTEM_PROMPT : TASK_TABLES_PROPOSE_SYSTEM_PROMPT },
+      { role: "user", content: userContent },
+    ],
+  });
+
+  const raw = completion.choices[0]?.message?.content;
+  if (!raw) throw new Error("رد فارغ من خدمة الذكاء الاصطناعي");
+
+  const validated = reportTaskTablesAiResultSchema.safeParse(extractJson(raw));
+  if (!validated.success) throw new Error("فشل التحقق من صيغة استجابة الذكاء الاصطناعي");
+  return { ...validated.data, taskId: String(task.taskIndex) };
+}
+
+let anonymousTableKeyCounter = 0;
+function nextAnonymousTableKey(): string {
+  anonymousTableKeyCounter++;
+  return `ai-proposed-${Date.now()}-${anonymousTableKeyCounter}`;
+}
+
+/** يحوّل رد النموذج (اختيار/اقتراح) إلى قائمة ProposedTable جاهزة للحفظ —
+ * أرقام/أعمدة/صفوف أي مرشح مختار تُؤخَذ حرفياً من الكائن الحتمي الأصلي
+ * (candidates)، لا من رد النموذج، مهما ذكر النموذج في ردّه. */
+export function resolveTaskTablesAiResult(
+  candidates: ProposedTable[],
+  aiResult: ReportTaskTablesAiResult,
+): ProposedTable[] {
+  const candidateByKey = new Map(candidates.map((c) => [c.key, c]));
+  const resolved: ProposedTable[] = [];
+
+  for (const selection of aiResult.selectedCandidates) {
+    const original = candidateByKey.get(selection.candidateKey);
+    if (!original) continue; // مفتاح غير موجود فعلياً — يُتجاهَل، لا يُختلَق جدول له
+    resolved.push({
+      ...original,
+      title: selection.title?.trim() || original.title,
+      basisNote: selection.basisNote?.trim() || original.basisNote,
+    });
+  }
+
+  // proposedTables لا تُستخدَم فعلياً إلا حين لا توجد مرشحات حتمية أصلاً
+  // (candidates.length === 0) — إنفاذ بنيوي، لا اعتماد على التزام النموذج.
+  if (candidates.length === 0) {
+    for (const proposed of aiResult.proposedTables) {
+      resolved.push({
+        key: nextAnonymousTableKey(),
+        title: proposed.title,
+        subtitle: proposed.subtitle,
+        columns: proposed.columns,
+        rows: proposed.rows,
+        basisNote: proposed.basisNote,
+        computation: "AI_PROPOSED",
+        sourceDocumentIds: [],
+        computationJson: null,
+      });
+    }
+  }
+
+  return resolved;
+}
+
+// ---------------------------------------------------------------------------
 // المنسِّق العام
 // ---------------------------------------------------------------------------
 
@@ -260,8 +433,10 @@ export async function draftCourtReport(
   aggregate: ReportAggregate,
   tasksToGenerate: AggregatedTask[],
   clientKeys?: ClientApiKeys | null,
+  deterministicTables?: Map<number, ProposedTable[]>,
 ): Promise<ReportDraftOutcome> {
   const candidates = resolveAiKeys(clientKeys);
+  const tablesByTaskIndex = deterministicTables ?? new Map<number, ProposedTable[]>();
 
   if (candidates.length === 0) {
     const { preliminarySections, settlement } = offlineDraftPreliminary(aggregate);
@@ -270,6 +445,12 @@ export async function draftCourtReport(
         preliminarySections,
         settlement,
         taskAnalyses: tasksToGenerate.map((t) => offlineDraftTask(aggregate, t)),
+        // لا استدعاء ذكاء اصطناعي في وضع عدم توفر مفتاح — الجداول الحتمية
+        // الجاهزة (إن وُجدت) تُحفَظ كما هي حرفياً بلا عنونة/تصفية مخصَّصة.
+        taskTables: tasksToGenerate.map((t) => ({
+          taskIndex: t.taskIndex,
+          tables: tablesByTaskIndex.get(t.taskIndex) ?? [],
+        })),
       },
       mode: "OFFLINE",
       warning:
@@ -308,6 +489,27 @@ export async function draftCourtReport(
     }
   }
 
+  // جداول كل مهمة: طلب إضافي واحد فقط للمهام ذات المادة المالية فعلياً
+  // (انظر taskHasFinancialMaterial) — لا يُستهلَك على مهمة إجرائية بحتة لا
+  // صلة لها بأرقام على الإطلاق. فشل هذا الطلب لا يُسقِط الجداول الحتمية
+  // الجاهزة أصلاً؛ تُحفَظ كما هي حرفياً بلا عنونة مخصَّصة بدل فقدانها.
+  const taskTables: TaskTablesResult[] = [];
+  for (const task of tasksToGenerate) {
+    const taskCandidates = tablesByTaskIndex.get(task.taskIndex) ?? [];
+    if (!taskHasFinancialMaterial(aggregate, task, taskCandidates.length > 0)) {
+      taskTables.push({ taskIndex: task.taskIndex, tables: [] });
+      continue;
+    }
+    try {
+      const { result } = await callWithAiFailover(candidates, (resolved) =>
+        callAiForTaskTables(resolved, aggregate, task, taskCandidates),
+      );
+      taskTables.push({ taskIndex: task.taskIndex, tables: resolveTaskTablesAiResult(taskCandidates, result) });
+    } catch {
+      taskTables.push({ taskIndex: task.taskIndex, tables: taskCandidates });
+    }
+  }
+
   const totalAttempts = tasksToGenerate.length + 1; // +1 للأقسام التمهيدية
   const mode: "AI" | "OFFLINE" = successCount > 0 ? "AI" : "OFFLINE";
   const warning =
@@ -317,5 +519,5 @@ export async function draftCourtReport(
         } — السبب: ${lastErrorMessage}`
       : undefined;
 
-  return { result: { preliminarySections, taskAnalyses, settlement }, mode, warning };
+  return { result: { preliminarySections, taskAnalyses, settlement, taskTables }, mode, warning };
 }

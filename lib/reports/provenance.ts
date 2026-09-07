@@ -58,10 +58,52 @@ export interface ExportGateTaskLike {
   expertVerdict?: string | null;
 }
 
+export interface ExportGateTableLike {
+  id: string;
+  provenance: string;
+  rowsJson: string;
+}
+
+export interface ExportGateObjectionLike {
+  id: string;
+  objectionText: string;
+  responseText: string | null;
+  responseProvenance: string;
+}
+
+export interface ExportGateReportLike {
+  conclusionProvenance: string | null;
+  conclusionItemsJson: string | null;
+}
+
 export interface ExportGateResult {
   blocked: boolean;
   /** فهارس (taskIndex) المهام التي لم يُعتمد رأي الخبرة فيها بعد. */
   uncertifiedTaskIndexes: number[];
+  /** معرّفات الجداول التي لم تُعتمد بعد (أو معتمدة بصفوف فارغة فعلياً). */
+  uncertifiedTableIds: string[];
+  /** معرّفات الاعتراضات التي لها نص لكن ردّها غير معتمَد بعد. */
+  uncertifiedObjectionIds: string[];
+  /** الخلاصة (ثامناً) — بوابة صارمة قائمة بذاتها، انظر التعليق أدناه. */
+  conclusionUncertified: boolean;
+}
+
+function hasRealTableRows(rowsJson: string): boolean {
+  try {
+    const rows = JSON.parse(rowsJson) as { cells: string[] }[];
+    return rows.some((r) => r.cells.some((c) => c.trim().length > 0));
+  } catch {
+    return false;
+  }
+}
+
+function hasRealConclusionItems(itemsJson: string | null): boolean {
+  if (!itemsJson) return false;
+  try {
+    return (JSON.parse(itemsJson) as unknown[]).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** بوابة التصدير/الاعتماد الحقيقية — تُستدعى من الخادم (المصدر الملزم) ومن
@@ -69,14 +111,58 @@ export interface ExportGateResult {
  * على الإطلاق يُعتبر محجوباً أيضاً — لا يوجد تقرير خبرة حقيقي بلا مهام.
  * وسم EXPERT_CERTIFIED على حقل فارغ فعلياً (مثال: صف مُرحَّل من نسخة سابقة
  * لم يكتب فيها الخبير شيئاً) لا يُحتسَب اعتماداً حقيقياً — يجب أن يوجد نص
- * فعلي أيضاً. */
-export function isExportBlocked(tasks: ExportGateTaskLike[]): ExportGateResult {
+ * فعلي أيضاً.
+ *
+ * الشكل القديم (مصفوفة مهام فقط) لا يزال مقبولاً كوسيط وحيد (توافق خلفي مع
+ * استدعاءات موجودة)؛ الشكل الجديد يضيف tables/objections/report اختيارية —
+ * جدول/اعتراض غير موجودَين في الاستدعاء لا يُحجبان شيئاً (لا يزالان غير
+ * مبنيَّين في هذا الاستدعاء تحديداً)، لكن إن مُرِّرا فيُطبَّق عليهما نفس
+ * منطق "معتمد يعني محتوى حقيقي فعلاً". الخلاصة (report.conclusionProvenance)
+ * بوابة صارمة قائمة بذاتها بمجرد تمرير report: لا يكفي أن تكون EXTRACT
+ * (رغم أن محتواها حقيقي فعلياً) — يجب أن يراجعها الخبير ويعتمدها EXPERT_CERTIFIED
+ * صراحةً كوحدة واحدة، لأنها أهم قسم في التقرير قانونياً (قرار مقصود، لا خطأ). */
+export function isExportBlocked(
+  tasks: ExportGateTaskLike[],
+  extra?: {
+    tables?: ExportGateTableLike[];
+    objections?: ExportGateObjectionLike[];
+    report?: ExportGateReportLike;
+  },
+): ExportGateResult {
   const isReallyCertified = (t: ExportGateTaskLike) =>
     t.expertVerdictProvenance === "EXPERT_CERTIFIED" &&
     (t.expertVerdict === undefined || (typeof t.expertVerdict === "string" && t.expertVerdict.trim().length > 0));
   const uncertifiedTaskIndexes = tasks.filter((t) => !isReallyCertified(t)).map((t) => t.taskIndex);
+
+  const tables = extra?.tables ?? [];
+  const uncertifiedTableIds = tables
+    .filter((t) => !(t.provenance === "EXPERT_CERTIFIED" && hasRealTableRows(t.rowsJson)))
+    .map((t) => t.id);
+
+  const objections = extra?.objections ?? [];
+  const uncertifiedObjectionIds = objections
+    .filter((o) => o.objectionText.trim().length > 0)
+    .filter((o) => !(o.responseProvenance === "EXPERT_CERTIFIED" && hasRealContentString(o.responseText)))
+    .map((o) => o.id);
+
+  const conclusionUncertified = extra?.report
+    ? !(extra.report.conclusionProvenance === "EXPERT_CERTIFIED" && hasRealConclusionItems(extra.report.conclusionItemsJson))
+    : false;
+
   return {
-    blocked: tasks.length === 0 || uncertifiedTaskIndexes.length > 0,
+    blocked:
+      tasks.length === 0 ||
+      uncertifiedTaskIndexes.length > 0 ||
+      uncertifiedTableIds.length > 0 ||
+      uncertifiedObjectionIds.length > 0 ||
+      conclusionUncertified,
     uncertifiedTaskIndexes,
+    uncertifiedTableIds,
+    uncertifiedObjectionIds,
+    conclusionUncertified,
   };
+}
+
+function hasRealContentString(value: string | null): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }

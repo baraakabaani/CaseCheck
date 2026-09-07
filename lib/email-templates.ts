@@ -3,7 +3,14 @@ import {
   type EmailDraftContent,
   type GenerateEmailInput,
 } from "./schemas";
-import { createAiClient, resolveAiKey, type ClientApiKeys, type ResolvedAiKey } from "./ai-client";
+import {
+  createAiClient,
+  resolveAiKeys,
+  callWithAiFailover,
+  AiFailoverError,
+  type ClientApiKeys,
+  type ResolvedAiKey,
+} from "./ai-client";
 
 export interface EmailCaseContext {
   caseNumber: string;
@@ -172,9 +179,9 @@ export async function generateEmailDraft(
     throw new Error("لا توجد مستندات ناقصة أو غير مكتملة لإنشاء خطاب بشأنها");
   }
 
-  const resolved = resolveAiKey(clientKeys);
+  const candidates = resolveAiKeys(clientKeys);
 
-  if (!resolved) {
+  if (candidates.length === 0) {
     return {
       content: buildFallbackContent(caseCtx, requirements, options.deadlineDays),
       mode: "OFFLINE",
@@ -182,10 +189,19 @@ export async function generateEmailDraft(
   }
 
   try {
-    const content = await callAiForEmail(resolved, caseCtx, requirements, options);
+    // يجرّب كل مزود متاح بالترتيب (Groq ثم Gemini) قبل اللجوء للقالب
+    // الاحتياطي — إن كان أحدهما قد بلغ حد الطلبات المجانية.
+    const { result: content } = await callWithAiFailover(candidates, (resolved) =>
+      callAiForEmail(resolved, caseCtx, requirements, options),
+    );
     return { content, mode: "AI" };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "خطأ غير معروف";
+    const message =
+      err instanceof AiFailoverError
+        ? err.message
+        : err instanceof Error
+          ? err.message
+          : "خطأ غير معروف";
     return {
       content: buildFallbackContent(caseCtx, requirements, options.deadlineDays),
       mode: "OFFLINE",

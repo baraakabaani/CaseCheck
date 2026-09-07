@@ -79,27 +79,93 @@ export interface ClientApiKeys {
 }
 
 /**
- * Resolution order per request — Groq is preferred over Gemini:
+ * Every AI key actually available for this request, in the order they
+ * should be tried — Groq first, Gemini second, each preferring a
+ * client-provided key over the server's own:
  *   1. client-provided Groq key (typed into the UI, sent as a header)
- *   2. client-provided Gemini key
- *   3. server GROQ_API_KEY
+ *   2. server GROQ_API_KEY
+ *   3. client-provided Gemini key
  *   4. server GEMINI_API_KEY
- *   5. none of the above → null, caller falls back to its offline heuristic
+ *   → empty array if none of the above is configured, caller falls back to
+ *     its offline heuristic.
  *
- * Gemini was briefly tried as the primary provider (larger free-tier token
- * budget, ~1M token context — see GEMINI_MODEL comment below) but its free
- * tier's *request-rate* limit (not just tokens/minute) turned out to be
- * tight enough to hit HTTP 429 in normal use, so Groq is primary again.
- * Gemini stays available as a fallback/alternative if a key is configured.
+ * This is what makes automatic provider failover possible (see
+ * callWithAiFailover below): a caller that has both a Groq and a Gemini key
+ * configured gets both candidates back, and can retry on Gemini if Groq's
+ * free-tier rate limit rejects the request, instead of giving up straight
+ * to the offline fallback. Gemini was briefly tried as the primary
+ * provider (larger free-tier token budget, ~1M token context — see
+ * GEMINI_MODEL comment below) but its free tier's *request-rate* limit
+ * (not just tokens/minute) turned out to be tight enough to hit HTTP 429 in
+ * normal use, so Groq stays first — Gemini is the fallback, not a
+ * replacement.
  */
-export function resolveAiKey(clientKeys?: ClientApiKeys | null): ResolvedAiKey | null {
+export function resolveAiKeys(clientKeys?: ClientApiKeys | null): ResolvedAiKey[] {
+  const keys: ResolvedAiKey[] = [];
+
   const groq = clientKeys?.groq?.trim() || process.env.GROQ_API_KEY?.trim();
-  if (groq) return { provider: "groq", apiKey: groq, model: GROQ_MODEL };
+  if (groq) keys.push({ provider: "groq", apiKey: groq, model: GROQ_MODEL });
 
   const gemini = clientKeys?.gemini?.trim() || process.env.GEMINI_API_KEY?.trim();
-  if (gemini) return { provider: "gemini", apiKey: gemini, model: GEMINI_MODEL };
+  if (gemini) keys.push({ provider: "gemini", apiKey: gemini, model: GEMINI_MODEL });
 
-  return null;
+  return keys;
+}
+
+/** Convenience for callers that only ever want the single best candidate
+ * (e.g. audio transcription, which only has a Groq-backed endpoint to
+ * begin with) — equivalent to resolveAiKeys(...)[0] ?? null. */
+export function resolveAiKey(clientKeys?: ClientApiKeys | null): ResolvedAiKey | null {
+  return resolveAiKeys(clientKeys)[0] ?? null;
+}
+
+export interface AiFailoverAttempt {
+  provider: AiProvider;
+  error: unknown;
+}
+
+/** Thrown by callWithAiFailover only once every candidate has failed —
+ * carries every attempt so the caller can build an honest, specific
+ * OFFLINE-fallback warning instead of just surfacing the last error. */
+export class AiFailoverError extends Error {
+  attempts: AiFailoverAttempt[];
+  constructor(attempts: AiFailoverAttempt[]) {
+    const last = attempts[attempts.length - 1];
+    const lastMessage = last?.error instanceof Error ? last.error.message : String(last?.error);
+    super(
+      attempts.length > 1
+        ? `فشلت كل مزودات الذكاء الاصطناعي المتاحة (${attempts.length}) — آخر خطأ (${last.provider}): ${lastMessage}`
+        : lastMessage,
+    );
+    this.name = "AiFailoverError";
+    this.attempts = attempts;
+  }
+}
+
+/**
+ * Runs `fn` against each candidate key in order (see resolveAiKeys),
+ * returning the first successful result. If a candidate's call throws —
+ * most commonly a 429 from that provider's free tier, but any error
+ * qualifies — it moves on to the next candidate instead of giving up
+ * immediately. Only throws (AiFailoverError) once every candidate has been
+ * tried and failed; callers catch that exactly where they previously
+ * caught a single provider's error, and fall back to the same offline
+ * heuristic as before.
+ */
+export async function callWithAiFailover<T>(
+  candidates: ResolvedAiKey[],
+  fn: (resolved: ResolvedAiKey) => Promise<T>,
+): Promise<{ result: T; provider: AiProvider }> {
+  const attempts: AiFailoverAttempt[] = [];
+  for (const resolved of candidates) {
+    try {
+      const result = await fn(resolved);
+      return { result, provider: resolved.provider };
+    } catch (err) {
+      attempts.push({ provider: resolved.provider, error: err });
+    }
+  }
+  throw new AiFailoverError(attempts);
 }
 
 export function getClientApiKeysFromRequest(req: Request): ClientApiKeys {

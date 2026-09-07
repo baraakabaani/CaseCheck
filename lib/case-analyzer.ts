@@ -15,7 +15,14 @@ import {
   type CaseAnalysisResult,
   type ReceivedDocumentSummary,
 } from "./case-analysis-schemas";
-import { createAiClient, resolveAiKey, type ClientApiKeys, type ResolvedAiKey } from "./ai-client";
+import {
+  createAiClient,
+  resolveAiKeys,
+  callWithAiFailover,
+  AiFailoverError,
+  type ClientApiKeys,
+  type ResolvedAiKey,
+} from "./ai-client";
 import { buildSmartIngestPayload, type SmartIngestDocument } from "./smart-ingest";
 import { offlineAnalyzeCaseFile } from "./offline-case-analyzer";
 import { MANDATE_NATURE_LABELS } from "./case-intake-labels";
@@ -198,22 +205,26 @@ export async function analyzeCaseFile(
   documents: CaseAnalyzerDocument[],
   clientKeys?: ClientApiKeys | null,
 ): Promise<CaseAnalysisOutcome> {
-  const resolved = resolveAiKey(clientKeys);
+  const candidates = resolveAiKeys(clientKeys);
 
-  if (!resolved) {
+  if (candidates.length === 0) {
     return { result: offlineAnalyzeCaseFile(caseCtx, parties, documents), mode: "OFFLINE" };
   }
 
   try {
-    const { result, truncationNote } = await callAiForAnalysis(
-      resolved,
-      caseCtx,
-      parties,
-      documents,
+    // يجرّب كل مزود متاح بالترتيب (Groq ثم Gemini) قبل اللجوء للتحليل
+    // الآلي الاحتياطي — إن كان أحدهما قد بلغ حد الطلبات المجانية.
+    const { result } = await callWithAiFailover(candidates, (resolved) =>
+      callAiForAnalysis(resolved, caseCtx, parties, documents),
     );
-    return { result, mode: "AI", warning: truncationNote };
+    return { result: result.result, mode: "AI", warning: result.truncationNote };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "خطأ غير معروف";
+    const message =
+      err instanceof AiFailoverError
+        ? err.message
+        : err instanceof Error
+          ? err.message
+          : "خطأ غير معروف";
     return {
       result: offlineAnalyzeCaseFile(caseCtx, parties, documents),
       mode: "OFFLINE",

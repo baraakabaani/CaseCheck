@@ -5,14 +5,30 @@
 // موثوق، وتحاول أيضاً مطابقة الإجابات الفعلية في النص مع الأسئلة المُعدّة
 // مسبقاً للاجتماع. يتبع نفس نمط lib/case-analyzer.ts بالضبط: الذكاء
 // الاصطناعي بصيغة JSON مع محرك احتياطي صادق (لا يخترع تصحيحات) بدون مفتاح.
+//
+// نصوص الاجتماعات الطويلة فعلياً تتجاوز ميزانية الرموز المسموح بها لطلب
+// واحد — بدل اقتطاع الباقي وفقدانه بالكامل (كما كان يحدث سابقاً)، يُقسَّم
+// النص إلى أجزاء متتالية يُصحَّح كل منها بطلب منفصل ثم تُجمَّع النتيجة
+// كاملة (splitTranscriptIntoChunks). كذلك، كل طلب يُجرَّب على كل مزود ذكاء
+// اصطناعي متاح بالترتيب (Groq ثم Gemini، عبر callWithAiFailover في
+// lib/ai-client.ts) قبل التنازل عن ذلك الجزء تحديداً والاحتفاظ بنصه الخام
+// كما هو — حتى بلوغ حد الطلبات المجانية لدى مزود واحد لا يعود يعني فشل
+// التصحيح بالكامل.
 
 import { z } from "zod";
-import { createAiClient, resolveAiKey, type ClientApiKeys, type ResolvedAiKey } from "./ai-client";
+import {
+  createAiClient,
+  resolveAiKeys,
+  callWithAiFailover,
+  AiFailoverError,
+  type ClientApiKeys,
+  type ResolvedAiKey,
+} from "./ai-client";
 import { tokenize, tokenSet, tokenCoverage } from "./text-normalize";
 
 const CHARS_PER_TOKEN = 3; // نفس المعيار التقريبي المستخدم في lib/smart-ingest.ts
-const TRANSCRIPT_TOKEN_BUDGET = 4000; // محاضر الاجتماعات الحقيقية قد تطول
-const TOTAL_TRANSCRIPT_CHARS_BUDGET = TRANSCRIPT_TOKEN_BUDGET * CHARS_PER_TOKEN;
+const TRANSCRIPT_TOKEN_BUDGET = 4000; // ميزانية كل جزء/طلب على حدة، وليس النص كاملاً
+const CHUNK_CHARS_BUDGET = TRANSCRIPT_TOKEN_BUDGET * CHARS_PER_TOKEN;
 
 export interface TranscriptCorrectionParty {
   name: string;
@@ -119,20 +135,48 @@ function matchQuestionId(
   return bestScore >= 0.5 ? bestId : null;
 }
 
-async function callAiForTranscriptCorrection(
-  resolved: ResolvedAiKey,
-  rawText: string,
-  ctx: TranscriptCorrectionContext,
-): Promise<{ outcome: TranscriptCorrectionOutcome; truncationNote?: string }> {
-  const client = createAiClient(resolved);
+/** يقسّم نص التفريغ الطويل إلى أجزاء متتالية، كل منها ضمن ميزانية الرموز
+ * المسموح بها لطلب واحد، بدل اقتطاع النص وفقدان ما بعد الحد بالكامل. يحاول
+ * القطع عند أقرب فراغ/سطر جديد قبل حد الميزانية تفادياً لتقطيع كلمة في
+ * منتصفها؛ نص أقصر من الميزانية يُعاد كجزء واحد دون تغيير. */
+function splitTranscriptIntoChunks(text: string, maxChars: number): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed ? [trimmed] : [];
 
-  const truncated = rawText.length > TOTAL_TRANSCRIPT_CHARS_BUDGET;
-  const transcriptExcerpt = rawText.slice(0, TOTAL_TRANSCRIPT_CHARS_BUDGET);
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < trimmed.length) {
+    let end = Math.min(start + maxChars, trimmed.length);
+    if (end < trimmed.length) {
+      const breakPoint = Math.max(trimmed.lastIndexOf(" ", end), trimmed.lastIndexOf("\n", end));
+      if (breakPoint > start) end = breakPoint;
+    }
+    const piece = trimmed.slice(start, end).trim();
+    if (piece) chunks.push(piece);
+    start = end;
+  }
+  return chunks;
+}
+
+interface ChunkCorrectionResult {
+  correctedTranscript: string;
+  matchedAnswers: { questionId: string; answerExcerpt: string }[];
+  extractedQuestions: { partyRole: "CLAIMANT" | "RESPONDENT"; questionText: string; answerText: string }[];
+}
+
+async function callAiForTranscriptChunk(
+  resolved: ResolvedAiKey,
+  chunkText: string,
+  ctx: TranscriptCorrectionContext,
+  chunkInfo: { index: number; total: number },
+): Promise<ChunkCorrectionResult> {
+  const client = createAiClient(resolved);
 
   const partiesBlock = ctx.parties
     .map((p) => `الصفة: ${p.role === "CLAIMANT" ? "مدعٍ" : "مدعى عليه"} — الاسم: ${p.name}`)
     .join("\n");
   const questionsBlock = buildQuestionsBlock(ctx.questions);
+  const isMultiPart = chunkInfo.total > 1;
 
   const userContent = `بيانات الدعوى:
 - رقم الدعوى: ${ctx.caseNumber}
@@ -142,14 +186,17 @@ ${ctx.court ? `- المحكمة: ${ctx.court}\n` : ""}${ctx.caseSummary ? `- م�
 أطراف الدعوى:
 ${partiesBlock || "غير محدد"}
 
-الأسئلة المُعدّة مسبقاً للاجتماع:
-${questionsBlock || "لا يوجد"}
+الأسئلة المُعدّة مسبقاً للاجتماع (التي لم تُطابَق إجابتها بعد):
+${questionsBlock || "لا يوجد — إما لا توجد أسئلة معدة، أو أن جميعها طوبقت بالفعل في أجزاء سابقة من هذا التفريغ"}
 
 =====
-
-نص التفريغ الآلي للاجتماع${truncated ? " (تم اقتصاصه لضيق المساحة)" : ""}:
+${
+    isMultiPart
+      ? `تنبيه: هذا هو الجزء رقم ${chunkInfo.index + 1} من أصل ${chunkInfo.total} من نص تفريغ أطول لنفس الاجتماع (قُسِّم فقط بسبب طوله، وليس لأي سبب آخر) — صحّح هذا الجزء فقط كما هو، وقد يبدأ أو ينتهي في منتصف جملة لأنه مقتطع من نص أطول؛ لا تُضف أي عبارة افتتاحية أو ختامية غير موجودة فعلياً في هذا الجزء.\n\n`
+      : ""
+  }نص التفريغ الآلي للاجتماع:
 """
-${transcriptExcerpt}
+${chunkText}
 """
 
 =====
@@ -159,8 +206,8 @@ ${transcriptExcerpt}
   const completion = await client.chat.completions.create({
     model: resolved.model,
     temperature: 0.2,
-    // Correction output can be as long as the (budgeted) input transcript,
-    // plus now an extractedQuestions array for unplanned Q&A found in the
+    // Correction output can be as long as the (budgeted) input chunk, plus
+    // now an extractedQuestions array for unplanned Q&A found in the
     // transcript — needs real headroom, unlike the compact-JSON outputs
     // elsewhere.
     max_tokens: 5500,
@@ -189,15 +236,9 @@ ${transcriptExcerpt}
     .filter((x): x is { questionId: string; answerExcerpt: string } => x !== null);
 
   return {
-    outcome: {
-      correctedTranscript: validated.data.correctedTranscript,
-      matchedAnswers,
-      extractedQuestions: validated.data.extractedQuestions,
-      mode: "AI",
-    },
-    truncationNote: truncated
-      ? "تم تصحيح النص بالذكاء الاصطناعي، لكن تم اقتصاص جزء من نص التفريغ لضيق حجم الطلب المسموح به — راجع الجزء المتبقي يدوياً إن لزم."
-      : undefined,
+    correctedTranscript: validated.data.correctedTranscript,
+    matchedAnswers,
+    extractedQuestions: validated.data.extractedQuestions,
   };
 }
 
@@ -206,9 +247,9 @@ export async function correctHearingTranscript(
   ctx: TranscriptCorrectionContext,
   clientKeys?: ClientApiKeys | null,
 ): Promise<TranscriptCorrectionOutcome> {
-  const resolved = resolveAiKey(clientKeys);
+  const candidates = resolveAiKeys(clientKeys);
 
-  if (!resolved) {
+  if (candidates.length === 0) {
     return {
       correctedTranscript: rawText,
       matchedAnswers: [],
@@ -219,17 +260,65 @@ export async function correctHearingTranscript(
     };
   }
 
-  try {
-    const { outcome, truncationNote } = await callAiForTranscriptCorrection(resolved, rawText, ctx);
-    return { ...outcome, warning: truncationNote };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "خطأ غير معروف";
+  const chunks = splitTranscriptIntoChunks(rawText, CHUNK_CHARS_BUDGET);
+  if (chunks.length === 0) {
+    return { correctedTranscript: rawText, matchedAnswers: [], extractedQuestions: [], mode: "OFFLINE" };
+  }
+
+  const correctedParts: string[] = [];
+  const matchedAnswers: TranscriptCorrectionOutcome["matchedAnswers"] = [];
+  const extractedQuestions: TranscriptCorrectionOutcome["extractedQuestions"] = [];
+  const failedChunkNumbers: number[] = [];
+  let remainingQuestions = ctx.questions;
+  let successCount = 0;
+  let lastErrorMessage: string | null = null;
+
+  // متتالٍ عمداً، وليس بالتوازي: طلبات متزامنة متعددة تستهلك حصة الدقيقة
+  // المجانية بسرعة أكبر لدى نفس المزود، وهي بالضبط المشكلة التي يعالجها
+  // هذا التعديل.
+  for (let i = 0; i < chunks.length; i++) {
+    try {
+      const { result } = await callWithAiFailover(candidates, (resolved) =>
+        callAiForTranscriptChunk(resolved, chunks[i], { ...ctx, questions: remainingQuestions }, {
+          index: i,
+          total: chunks.length,
+        }),
+      );
+      successCount++;
+      correctedParts.push(result.correctedTranscript);
+      for (const ma of result.matchedAnswers) {
+        matchedAnswers.push(ma);
+        remainingQuestions = remainingQuestions.filter((q) => q.id !== ma.questionId);
+      }
+      extractedQuestions.push(...result.extractedQuestions);
+    } catch (err) {
+      failedChunkNumbers.push(i + 1);
+      lastErrorMessage =
+        err instanceof AiFailoverError ? err.message : err instanceof Error ? err.message : "خطأ غير معروف";
+      // يُحتفظ بالنص الخام لهذا الجزء تحديداً بدل إسقاطه بالكامل — تصحيح
+      // جزئي صادق أفضل من فقدان جزء من محضر الاجتماع.
+      correctedParts.push(chunks[i]);
+    }
+  }
+
+  if (successCount === 0) {
     return {
       correctedTranscript: rawText,
       matchedAnswers: [],
       extractedQuestions: [],
       mode: "OFFLINE",
-      warning: `تعذر استخدام الذكاء الاصطناعي (${message})، تم حفظ النص كما رُفع دون تعديل.`,
+      warning: `تعذر استخدام الذكاء الاصطناعي (${lastErrorMessage})، تم حفظ النص كما رُفع دون تعديل.`,
     };
   }
+
+  return {
+    correctedTranscript: correctedParts.join(" ").trim(),
+    matchedAnswers,
+    extractedQuestions,
+    mode: "AI",
+    warning:
+      failedChunkNumbers.length > 0
+        ? `تم تصحيح ${successCount} من أصل ${chunks.length} جزء من نص التفريغ بالذكاء الاصطناعي، لكن تعذر تصحيح الجزء رقم ${failedChunkNumbers.join("، ")} فتم الاحتفاظ بنصه الخام كما هو دون تصحيح — السبب: ${lastErrorMessage}`
+        : undefined,
+  };
 }

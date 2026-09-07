@@ -44,30 +44,62 @@ Open [http://localhost:3000](http://localhost:3000).
 | `GEMINI_MODEL` | Optional override, defaults to `gemini-3.6-flash` |
 | `UPLOADS_DIR` | Local folder for uploaded case files (default `uploads`) |
 
-### Five ways to run the AI-backed features
+### Running the AI-backed features, and what happens when a free tier is exhausted
 
-The app resolves an API key in this order, per request (`lib/ai-client.ts`):
+Per request, the app resolves every API key actually available and tries
+them **in order until one succeeds** (`resolveAiKeys` +
+`callWithAiFailover`, `lib/ai-client.ts`) — it doesn't stop at the first
+provider it finds and give up if that one is rate-limited:
 
 1. **A Groq key typed into the UI** (the "مفتاح الذكاء الاصطناعي" button in
    the header) — stored in the browser's `localStorage` only, sent to this
-   app's own API routes as an `x-groq-api-key` header.
-2. **A Gemini key typed into the UI** — same mechanism, `x-gemini-api-key` header.
-3. **`GROQ_API_KEY`** on the server, if no client key is provided.
-4. **`GEMINI_API_KEY`** on the server, if none of the above is available.
-5. **Offline fallback** — if none of the above is set, `lib/offline-matcher.ts`
-   / `lib/offline-case-analyzer.ts` run a local keyword/period-coverage
-   heuristic instead of calling any API, and the email generator falls back
-   to a deterministic Arabic template (`lib/email-templates.ts`). Every
-   AI-backed response reports which mode ran (`mode: "AI" | "OFFLINE"`),
-   surfaced to the user as a toast.
+   app's own API routes as an `x-groq-api-key` header. Tried first.
+2. **`GROQ_API_KEY`** on the server, if no client Groq key is provided.
+3. **A Gemini key typed into the UI** (`x-gemini-api-key` header) — tried
+   next, automatically, **only if step 1/2's Groq call actually fails**
+   (most commonly Groq's free-tier rate limit, but any error qualifies).
+4. **`GEMINI_API_KEY`** on the server, if no client Gemini key is provided.
+5. **Offline fallback** — only once every configured provider above has
+   been tried and failed (or none is configured at all):
+   `lib/offline-matcher.ts` / `lib/offline-case-analyzer.ts` run a local
+   keyword/period-coverage heuristic instead of calling any API, and the
+   email generator falls back to a deterministic Arabic template
+   (`lib/email-templates.ts`). Every AI-backed response reports which mode
+   actually ran (`mode: "AI" | "OFFLINE"`, plus a specific warning
+   naming which step failed and why), surfaced to the user as a toast —
+   never silently swapped without telling anyone.
 
-Groq is preferred over Gemini whenever both are available. Gemini was
-briefly tried as the primary provider — its free tier has a far larger
-*token* budget and a ~1M token context window, which would remove the
-document-truncation tradeoff described below for most real cases — but its
-free tier's *request-rate* limit turned out to be tight enough to hit HTTP
-429 in normal use, so Groq is primary again. Gemini remains available as a
-fallback/alternative provider if you hit Groq's own rate limit instead.
+**Practical upshot:** configuring *both* a Groq key and a Gemini key (free
+tier is fine for either) is the supported way to get more effective free
+usage than one provider's free tier alone — Groq runs first for its lower
+latency and larger practical token budget, and Gemini picks up automatically
+the moment Groq's free tier says no, rather than every request past that
+point falling back to no AI at all. (This is different from — and doesn't
+require — running multiple *accounts* on the same provider to dodge its
+rate limit; that's not something this app does.) Verified live: with a
+deliberately invalid Groq key forcing a real failure, a request still
+completed via Gemini automatically, with no user-visible difference beyond
+a slightly longer response time.
+
+Groq is still preferred first whenever both are available — its free tier
+has significantly higher request-rate limits in practice, even though
+Gemini's free tier has a far larger *token* budget and a ~1M token context
+window (see `GEMINI_MODEL` in `lib/ai-client.ts`).
+
+For anything that sends a genuinely long transcript in one request — a
+long hearing recording, mainly (`lib/hearing-transcript-ai.ts`) — the text
+is also split into sequential chunks that each fit one request's token
+budget and corrected one at a time (`splitTranscriptIntoChunks`), then
+stitched back into one full corrected transcript, instead of the previous
+behavior of silently truncating anything past the first ~4,000 tokens and
+losing the rest. Each chunk still goes through the same Groq→Gemini
+failover independently; if a specific chunk fails on *every* available
+provider, that one chunk's raw (uncorrected) text is kept in place rather
+than dropped, and the response names exactly which chunk number couldn't
+be corrected and why — verified live against a genuinely long (~40,000
+character) synthetic transcript, including a real mid-run failure on one
+chunk (both providers briefly unavailable) that was handled exactly this
+way while the rest of the transcript still came back fully corrected.
 
 ## How it works — the 4-phase intake wizard (نموذج الخبرة القضائية)
 

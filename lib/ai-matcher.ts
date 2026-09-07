@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { aiMatchResponseSchema, type AiMatchResponse, type CaseType } from "./schemas";
-import { createAiClient, resolveAiKey, type ClientApiKeys, type ResolvedAiKey } from "./ai-client";
+import {
+  createAiClient,
+  resolveAiKeys,
+  callWithAiFailover,
+  AiFailoverError,
+  type ClientApiKeys,
+  type ResolvedAiKey,
+} from "./ai-client";
 import { offlineMatchDocumentsToRequirements } from "./offline-matcher";
 import { buildSingleDocumentDigest } from "./smart-ingest";
 import type { MatchDocumentInput, MatchRequirementInput } from "./matching-types";
@@ -215,9 +222,9 @@ export async function matchDocumentsToRequirements(
     return { response: { results: [] }, mode: "OFFLINE" };
   }
 
-  const resolved = resolveAiKey(clientKeys);
+  const candidates = resolveAiKeys(clientKeys);
 
-  if (!resolved) {
+  if (candidates.length === 0) {
     return {
       response: offlineMatchDocumentsToRequirements(requirements, documents, caseType),
       mode: "OFFLINE",
@@ -240,14 +247,19 @@ export async function matchDocumentsToRequirements(
   }
 
   try {
-    const { response, truncationNote } = await callAiForMatching(
-      resolved,
-      requirements,
-      documents,
+    // يجرّب كل مزود متاح بالترتيب (Groq ثم Gemini) قبل اللجوء للمطابقة
+    // الآلية الاحتياطية — إن كان أحدهما قد بلغ حد الطلبات المجانية.
+    const { result } = await callWithAiFailover(candidates, (resolved) =>
+      callAiForMatching(resolved, requirements, documents),
     );
-    return { response, mode: "AI", warning: truncationNote };
+    return { response: result.response, mode: "AI", warning: result.truncationNote };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "خطأ غير معروف";
+    const message =
+      err instanceof AiFailoverError
+        ? err.message
+        : err instanceof Error
+          ? err.message
+          : "خطأ غير معروف";
     return {
       response: offlineMatchDocumentsToRequirements(requirements, documents, caseType),
       mode: "OFFLINE",

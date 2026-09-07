@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import { NoticeForm } from "@/components/NoticeForm";
 import { prisma } from "@/lib/db";
+import { getExpertProfile } from "@/lib/queries";
 import type { MissingDocumentItem } from "@/lib/case-analysis-schemas";
 
 export default async function NewNoticePage({
@@ -26,6 +27,8 @@ export default async function NewNoticePage({
   });
 
   if (!caseRecord) notFound();
+
+  const expertProfile = await getExpertProfile();
 
   let suggestedItems: string[];
 
@@ -67,6 +70,15 @@ export default async function NewNoticePage({
           caseNumber={caseRecord.caseNumber}
           suggestedItems={suggestedItems}
           defaultMeetingDate={caseRecord.nextHearingDate?.toISOString().slice(0, 10) ?? null}
+          expertProfile={
+            expertProfile
+              ? {
+                  expertTitle: expertProfile.expertTitle,
+                  expertName: expertProfile.expertName,
+                  registrationNumber: expertProfile.registrationNumber,
+                }
+              : null
+          }
         />
       </main>
     </div>

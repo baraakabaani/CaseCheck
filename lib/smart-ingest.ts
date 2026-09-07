@@ -16,6 +16,7 @@
 // automatically computed so the expert knows to verify it.
 
 import type { DocCategory } from "./schemas";
+import { CREDIT_KEYWORDS, DEBIT_KEYWORDS, BALANCE_KEYWORDS } from "./financial/keywords";
 
 const CHARS_PER_TOKEN = 3; // Arabic-heavy text, same heuristic used in lib/ai-matcher.ts / lib/case-analyzer.ts
 
@@ -140,10 +141,6 @@ const FINANCIAL_STATEMENT_MARKERS = [
   "تقرير مدقق الحسابات",
   "رأي مراقب الحسابات",
 ];
-
-const CREDIT_KEYWORDS = ["دائن", "ايداع", "إيداع", "credit", "deposit"];
-const DEBIT_KEYWORDS = ["مدين", "سحب", "debit", "withdrawal"];
-const BALANCE_KEYWORDS = ["رصيد", "balance"];
 
 function parseAmount(raw: string): number | null {
   const cleaned = raw.replace(/[^\d.\-]/g, "");

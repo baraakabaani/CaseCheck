@@ -64,7 +64,12 @@ function extractJson(raw: string): unknown {
 function buildCaseHeaderBlock(aggregate: ReportAggregate): string {
   const { basics } = aggregate;
   const partiesBlock = aggregate.parties
-    .map((p) => `partyId: ${p.id} — الصفة: ${CASE_PARTY_ROLE_LABELS[p.role as "CLAIMANT" | "RESPONDENT"]} — الاسم: ${p.name}`)
+    .map(
+      (p) =>
+        `partyId: ${p.id} — الصفة: ${CASE_PARTY_ROLE_LABELS[p.role as "CLAIMANT" | "RESPONDENT"]} — الاسم: ${p.name}${
+          p.capacityNote ? ` (${p.capacityNote})` : ""
+        }`,
+    )
     .join("\n");
   return `بيانات الدعوى:
 - رقم الدعوى: ${basics.caseNumber}

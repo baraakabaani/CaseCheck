@@ -23,6 +23,13 @@ import { loadFormDraft, saveFormDraft, clearFormDraft } from "@/lib/form-draft";
 
 const DRAFT_KEY = "case-intake-step1-draft";
 
+export interface PartyDraft {
+  name: string;
+  /** الصفة كما تُطبع في غلاف تقرير الخبرة (الموديول 4): "شريك بنسبة 68%
+   * ومدير الشركة" — اختيارية. */
+  capacityNote: string;
+}
+
 export interface CaseIntakeStep1InitialData {
   caseNumber: string;
   court: string;
@@ -30,8 +37,8 @@ export interface CaseIntakeStep1InitialData {
   litigationDegree: LitigationDegree;
   caseCategory: CaseCategory;
   title: string | null;
-  claimants: string[];
-  respondents: string[];
+  claimants: PartyDraft[];
+  respondents: PartyDraft[];
   notes: string | null;
   clientName: string | null;
   clientEmail: string | null;
@@ -44,37 +51,53 @@ interface Step1Draft {
   litigationDegree: LitigationDegree;
   caseCategory: CaseCategory;
   title: string;
-  claimants: string[];
-  respondents: string[];
+  // مصفوفة نصوص هي الصيغة القديمة لهذا الحقل (قبل إضافة الصفة) — قد تبقى
+  // محفوظة في متصفح مستخدم لم يزر الصفحة منذ هذا التعديل.
+  claimants: PartyDraft[] | string[];
+  respondents: PartyDraft[] | string[];
   notes: string;
   clientName: string;
   clientEmail: string;
 }
 
+function normalizeDraftParties(parties: PartyDraft[] | string[] | undefined): PartyDraft[] | null {
+  if (!parties?.length) return null;
+  return parties.map((p) => (typeof p === "string" ? { name: p, capacityNote: "" } : p));
+}
+
 function PartyListEditor({
   label,
   placeholder,
-  names,
+  parties,
   onChange,
 }: {
   label: string;
   placeholder: string;
-  names: string[];
-  onChange: (next: string[]) => void;
+  parties: PartyDraft[];
+  onChange: (next: PartyDraft[]) => void;
 }) {
-  function update(i: number, value: string) {
-    onChange(names.map((n, idx) => (idx === i ? value : n)));
+  function update(i: number, patch: Partial<PartyDraft>) {
+    onChange(parties.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
   }
   function remove(i: number) {
-    onChange(names.filter((_, idx) => idx !== i));
+    onChange(parties.filter((_, idx) => idx !== i));
   }
   return (
     <div className="flex flex-col gap-1.5">
       <Label>{label} *</Label>
-      {names.map((name, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <Input value={name} onChange={(e) => update(i, e.target.value)} placeholder={placeholder} />
-          {names.length > 1 && (
+      {parties.map((party, i) => (
+        <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-center">
+          <Input
+            value={party.name}
+            onChange={(e) => update(i, { name: e.target.value })}
+            placeholder={placeholder}
+          />
+          <Input
+            value={party.capacityNote}
+            onChange={(e) => update(i, { capacityNote: e.target.value })}
+            placeholder="الصفة (اختياري) — مثال: شريك بنسبة 68% ومدير الشركة"
+          />
+          {parties.length > 1 && (
             <Button type="button" variant="ghost" size="icon" onClick={() => remove(i)}>
               <Trash2 className="size-4 text-destructive" />
             </Button>
@@ -86,7 +109,7 @@ function PartyListEditor({
         variant="outline"
         size="sm"
         className="w-fit"
-        onClick={() => onChange([...names, ""])}
+        onClick={() => onChange([...parties, { name: "", capacityNote: "" }])}
       >
         <Plus className="size-4" />
         إضافة طرف
@@ -120,11 +143,11 @@ export function CaseIntakeStep1Form({
     initialData?.caseCategory ?? "COMMERCIAL",
   );
   const [title, setTitle] = useState(initialData?.title ?? "");
-  const [claimants, setClaimants] = useState<string[]>(
-    initialData?.claimants.length ? initialData.claimants : [""],
+  const [claimants, setClaimants] = useState<PartyDraft[]>(
+    initialData?.claimants.length ? initialData.claimants : [{ name: "", capacityNote: "" }],
   );
-  const [respondents, setRespondents] = useState<string[]>(
-    initialData?.respondents.length ? initialData.respondents : [""],
+  const [respondents, setRespondents] = useState<PartyDraft[]>(
+    initialData?.respondents.length ? initialData.respondents : [{ name: "", capacityNote: "" }],
   );
   const [notes, setNotes] = useState(initialData?.notes ?? "");
   const [clientName, setClientName] = useState(initialData?.clientName ?? "");
@@ -150,8 +173,10 @@ export function CaseIntakeStep1Form({
     if (draft.litigationDegree) setLitigationDegree(draft.litigationDegree);
     if (draft.caseCategory) setCaseCategory(draft.caseCategory);
     if (draft.title) setTitle(draft.title);
-    if (draft.claimants?.length) setClaimants(draft.claimants);
-    if (draft.respondents?.length) setRespondents(draft.respondents);
+    const normalizedClaimants = normalizeDraftParties(draft.claimants);
+    if (normalizedClaimants) setClaimants(normalizedClaimants);
+    const normalizedRespondents = normalizeDraftParties(draft.respondents);
+    if (normalizedRespondents) setRespondents(normalizedRespondents);
     if (draft.notes) setNotes(draft.notes);
     if (draft.clientName) setClientName(draft.clientName);
     if (draft.clientEmail) setClientEmail(draft.clientEmail);
@@ -195,8 +220,9 @@ export function CaseIntakeStep1Form({
       toast.error("الرجاء تعبئة رقم الدعوى والمحكمة");
       return;
     }
-    const cleanedClaimants = claimants.map((n) => n.trim()).filter(Boolean);
-    const cleanedRespondents = respondents.map((n) => n.trim()).filter(Boolean);
+    const cleanParty = (p: PartyDraft) => ({ name: p.name.trim(), capacityNote: p.capacityNote.trim() || null });
+    const cleanedClaimants = claimants.map(cleanParty).filter((p) => p.name);
+    const cleanedRespondents = respondents.map(cleanParty).filter((p) => p.name);
     if (cleanedClaimants.length === 0 || cleanedRespondents.length === 0) {
       toast.error("الرجاء إدخال اسم مدعٍ واحد على الأقل ومدعى عليه واحد على الأقل");
       return;
@@ -321,13 +347,13 @@ export function CaseIntakeStep1Form({
           <PartyListEditor
             label="اسم المدعي / المستأنف"
             placeholder="اسم المدعي"
-            names={claimants}
+            parties={claimants}
             onChange={setClaimants}
           />
           <PartyListEditor
             label="اسم المدعى عليه / المستأنف ضده"
             placeholder="اسم المدعى عليه"
-            names={respondents}
+            parties={respondents}
             onChange={setRespondents}
           />
 

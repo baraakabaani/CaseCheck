@@ -717,7 +717,7 @@ export interface ReportAggregate {
     analysisApproved: boolean;
     taskCount: number;
   };
-  parties: { id: string; role: string; name: string }[];
+  parties: { id: string; role: string; name: string; capacityNote: string | null }[];
   attendees: { name: string; role: string; representingParty: string | null; hasPoa: boolean }[];
   timeline: ProceduralTimelineEvent[];
   timelineMissingDates: string[];
@@ -766,7 +766,7 @@ export async function buildReportAggregate(caseId: string): Promise<ReportAggreg
       analysisApproved: analysis?.status === "APPROVED",
       taskCount: mandateTasks.length,
     },
-    parties: src.parties.map((p) => ({ id: p.id, role: p.role, name: p.name })),
+    parties: src.parties.map((p) => ({ id: p.id, role: p.role, name: p.name, capacityNote: p.capacityNote })),
     attendees: src.meetingAttendees.map((a) => ({
       name: a.name,
       role: a.role,

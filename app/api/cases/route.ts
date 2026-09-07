@@ -53,8 +53,8 @@ export async function POST(req: NextRequest) {
       intakeStatus: "DRAFT_PHASE_2",
       parties: {
         create: [
-          ...claimants.map((name, order) => ({ role: "CLAIMANT", name, order })),
-          ...respondents.map((name, order) => ({ role: "RESPONDENT", name, order })),
+          ...claimants.map((p, order) => ({ role: "CLAIMANT", name: p.name, capacityNote: p.capacityNote, order })),
+          ...respondents.map((p, order) => ({ role: "RESPONDENT", name: p.name, capacityNote: p.capacityNote, order })),
         ],
       },
     },

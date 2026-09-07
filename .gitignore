@@ -28,6 +28,9 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# real client case reference documents (never commit — sensitive)
+تقرير الخبرة المحاسبية النهائي*.docx
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)

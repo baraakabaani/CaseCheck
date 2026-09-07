@@ -34,8 +34,12 @@ export default async function NewCasePage({
       litigationDegree: (caseRecord.litigationDegree as LitigationDegree) ?? "FIRST_INSTANCE",
       caseCategory: (caseRecord.caseCategory as CaseCategory) ?? "COMMERCIAL",
       title: caseRecord.title,
-      claimants: caseRecord.parties.filter((p) => p.role === "CLAIMANT").map((p) => p.name),
-      respondents: caseRecord.parties.filter((p) => p.role === "RESPONDENT").map((p) => p.name),
+      claimants: caseRecord.parties
+        .filter((p) => p.role === "CLAIMANT")
+        .map((p) => ({ name: p.name, capacityNote: p.capacityNote ?? "" })),
+      respondents: caseRecord.parties
+        .filter((p) => p.role === "RESPONDENT")
+        .map((p) => ({ name: p.name, capacityNote: p.capacityNote ?? "" })),
       notes: caseRecord.notes,
       clientName: caseRecord.clientName,
       clientEmail: caseRecord.clientEmail,

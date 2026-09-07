@@ -88,6 +88,24 @@ export const committeeMemberSchema = z.object({
 export type CommitteeMember = z.infer<typeof committeeMemberSchema>;
 
 // المرحلة 1 — بيانات القضية الأساسية
+// كل طرف: اسم فقط (الصيغة القديمة، نصاً حراً — لا تزال مقبولة لتوافق أي
+// مسودة محفوظة في localStorage من قبل هذا التعديل) أو اسم + صفة اختيارية
+// (شريك بنسبة 68% ومدير الشركة...، تُطبع في غلاف تقرير الخبرة، الموديول
+// 4). كلا الشكلين يُطبَّعان إلى نفس الناتج {name, capacityNote}.
+export const casePartyInputSchema = z.union([
+  z
+    .string()
+    .min(1, "اسم الطرف مطلوب")
+    .transform((name) => ({ name, capacityNote: null as string | null })),
+  z
+    .object({
+      name: z.string().min(1, "اسم الطرف مطلوب"),
+      capacityNote: z.string().trim().min(1).optional().nullable(),
+    })
+    .transform((v) => ({ name: v.name, capacityNote: v.capacityNote ?? null })),
+]);
+export type CasePartyInput = z.infer<typeof casePartyInputSchema>;
+
 export const caseIntakeStep1Schema = z.object({
   caseNumber: z.string().min(1, "رقم الدعوى مطلوب"),
   court: z.string().min(1, "المحكمة / الجهة القضائية مطلوبة"),
@@ -95,8 +113,8 @@ export const caseIntakeStep1Schema = z.object({
   litigationDegree: z.enum(LITIGATION_DEGREES),
   caseCategory: z.enum(CASE_CATEGORIES),
   title: z.string().optional().nullable(), // عنوان مختصر للقضية
-  claimants: z.array(z.string().min(1)).min(1, "الرجاء إضافة مدعٍ واحد على الأقل"),
-  respondents: z.array(z.string().min(1)).min(1, "الرجاء إضافة مدعى عليه واحد على الأقل"),
+  claimants: z.array(casePartyInputSchema).min(1, "الرجاء إضافة مدعٍ واحد على الأقل"),
+  respondents: z.array(casePartyInputSchema).min(1, "الرجاء إضافة مدعى عليه واحد على الأقل"),
   notes: z.string().optional().nullable(), // ملاحظات أولية
   // مراسلة المتعامل — منفصلة عن أطراف الدعوى، تُستخدم في خطاب استكمال المستندات
   clientName: z.string().optional().nullable(),

@@ -70,12 +70,13 @@ model Case {
 // المستأنف ضده) — a case can have more than one of each.
 // ---------------------------------------------------------------------------
 model CaseParty {
-  id     String @id @default(cuid())
-  caseId String
-  case   Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  role   String // CLAIMANT | RESPONDENT
-  name   String
-  order  Int    @default(0)
+  id           String  @id @default(cuid())
+  caseId       String
+  case         Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  role         String // CLAIMANT | RESPONDENT
+  name         String
+  order        Int     @default(0)
+  capacityNote String? // صفة الطرف كما تُطبع في تقرير الخبرة: "شريك بنسبة 68% ومدير الشركة"
 
   submittedDocuments Document[]
 
@@ -477,6 +478,27 @@ model CourtReport {
   settlementNarrative           String?
   settlementNarrativeProvenance String  @default("AI_DRAFT")
 
+  // خطاب الغلاف الموجَّه للقاضي (نمط التقرير المرجعي)
+  judgeName  String? // "سعادة القاضي / حسام شريف محمد سيف"
+  judgeTitle String? // "قاضي محكمة عجمان الاتحادية الابتدائية – المحكمة الابتدائية المدنية"
+  letterDate DateTime?
+
+  // خامساً: نطاق الفحص والمستندات المعتمدة (قبل الدخول في تحليل كل مهمة)
+  scopeNarrative           String?
+  scopeNarrativeProvenance String  @default("AI_DRAFT")
+
+  // سابعاً: عرض التقرير المبدئي على الأطراف
+  preliminaryReportSharedAt DateTime?
+  objectionsDeadline        DateTime?
+  objectionsIntro           String?
+  objectionsIntroProvenance String    @default("AI_DRAFT")
+
+  // ثامناً: الخلاصة — بنود مرقّمة (تُبذَر من رأي الخبرة المعتمَد لكل مهمة)
+  conclusionIntro      String?
+  conclusionItemsJson  String? // JSON string[]
+  conclusionClosing    String?
+  conclusionProvenance String  @default("AI_DRAFT")
+
   // لقطة التجميع الحتمي وقت آخر توليد (JSON — نفس عرف تخزين JSON كنص
   // المُتّبع في كل هذا المخطط لقاعدة SQLite)
   timelineJson    String? // JSON: ProceduralTimelineEvent[]
@@ -490,7 +512,9 @@ model CourtReport {
 
   updatedAt DateTime @updatedAt
 
-  tasks CourtReportTask[]
+  tasks      CourtReportTask[]
+  tables     CourtReportTable[]
+  objections ReportObjection[]
 }
 
 // قسم مستقل لكل مهمة من مهام المأمورية (CaseAnalysis.mandateTasks). بما أن
@@ -529,6 +553,86 @@ model CourtReportTask {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  tables CourtReportTable[]
+
   @@unique([courtReportId, taskIndex])
   @@index([courtReportId])
+}
+
+// جدول بيانات مالي واحد ضمن التقرير (نمط التقرير المرجعي: عشرات الجداول
+// المحاسبية المُخصَّصة). قد يتبع مهمة محددة (placement TASK) أو يتبع
+// التقرير مباشرة (SCOPE لجدول الحصص ضمن نطاق الفحص، SETTLEMENT لجدول
+// التصفية) — لهذا الحقل courtReportTaskId اختياري بدل اشتراط مهمة وهمية.
+model CourtReportTable {
+  id                String            @id @default(cuid())
+  courtReportId     String
+  courtReport       CourtReport       @relation(fields: [courtReportId], references: [id], onDelete: Cascade)
+  courtReportTaskId String?
+  courtReportTask   CourtReportTask?  @relation(fields: [courtReportTaskId], references: [id], onDelete: Cascade)
+
+  placement String @default("TASK") // SCOPE | TASK | SETTLEMENT
+  order     Int    @default(0)
+
+  title    String // "(1) الإيرادات والمبيعات السنوية الفعلية:"
+  subtitle String?
+
+  columnsJson String // JSON: [{ key, label, align? }]
+  rowsJson    String // JSON: [{ cells: string[], isTotal?: boolean }]
+  basisNote   String? // سند الأرقام / أساس الاحتساب
+
+  // مصدر الأرقام: DETERMINISTIC (حساب حتمي من مستند مُحلَّل فعلياً) |
+  // AI_PROPOSED (اقتراح الذكاء الاصطناعي من نص المستند) | MANUAL (أدخلها
+  // الخبير يدوياً). لا علاقة له بـ provenance أدناه — هذا مصدر الأرقام،
+  // وذاك حالة مراجعة الخبير لها (كلا الأمرين مطلوب قبل التصدير).
+  computation       String  @default("AI_PROPOSED")
+  sourceDocumentIds String? // JSON string[] — Document.id
+  computationJson   String? // لقطة مدخلات التجميع الحتمي، للتدقيق لاحقاً
+  provenance        String  @default("AI_DRAFT")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courtReportId])
+  @@index([courtReportTaskId])
+}
+
+// اعتراض طرف على التقرير المبدئي ورد الخبرة عليه (سابعاً: عرض التقرير
+// المبدئي على الأطراف). نص الاعتراض منقول حرفياً من مذكرة التعقيب
+// (EXTRACT)؛ رد الخبرة يُكتب يدوياً بالخبير دوماً في هذه النسخة (لا
+// اقتراح ذكاء اصطناعي جماعي لردود على اعتراضات خصومية).
+model ReportObjection {
+  id            String      @id @default(cuid())
+  courtReportId String
+  courtReport   CourtReport @relation(fields: [courtReportId], references: [id], onDelete: Cascade)
+
+  partyRole                String // CLAIMANT | RESPONDENT
+  submittedOnBehalfOfLabel String // "وكيل المدعيين"
+  objectionMemoDate        DateTime?
+  order                    Int       @default(0)
+
+  objectionText       String
+  objectionProvenance String  @default("EXTRACT")
+  responseText        String?
+  responseProvenance  String  @default("AI_DRAFT")
+  linkedTaskIndex     Int? // ربط اختياري بالمهمة محل الاعتراض
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courtReportId])
+}
+
+// بيانات الخبير الحسابي الثابتة (اسم، صفة، رقم قيد، وسائل تواصل) — سجل
+// واحد فقط، لأن هذا التطبيق بلا مستخدمين/مصادقة متعددة. تُستخدم في غلاف
+// تقرير الخبرة وتوقيعه، وفي نموذج الإخطار (بدل إعادة كتابتها في كل مرة).
+model ExpertProfile {
+  id                 String   @id // ثابت: "default"
+  expertName         String   @default("")
+  expertTitle        String   @default("الخبير الحسابي")
+  registrationNumber String   @default("") // رقم القيد وزارة العدل
+  phone              String?
+  fax                String?
+  mobile             String?
+  email              String?
+  updatedAt          DateTime @updatedAt
 }

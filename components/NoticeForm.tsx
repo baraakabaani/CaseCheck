@@ -24,12 +24,16 @@ export function NoticeForm({
   caseNumber,
   suggestedItems,
   defaultMeetingDate,
+  expertProfile,
 }: {
   caseId: string;
   caseNumber: string;
   suggestedItems: string[];
   /** مُعبّأة من تاريخ الجلسة القادمة للدعوى إن وُجد (YYYY-MM-DD) */
   defaultMeetingDate?: string | null;
+  /** مُعبّأة من بيانات الخبير المحفوظة (زر «بيانات الخبير» أعلى الصفحة)
+   * إن وُجدت — تبقى قابلة للتعديل هنا كأي حقل آخر. */
+  expertProfile?: { expertTitle: string; expertName: string; registrationNumber: string } | null;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -58,9 +62,11 @@ export function NoticeForm({
     suggestedItems.length > 0 ? suggestedItems : [""],
   );
 
-  const [expertTitle, setExpertTitle] = useState("الخبير الحسابي");
-  const [expertName, setExpertName] = useState("");
-  const [expertRegistrationNumber, setExpertRegistrationNumber] = useState("");
+  const [expertTitle, setExpertTitle] = useState(expertProfile?.expertTitle ?? "الخبير الحسابي");
+  const [expertName, setExpertName] = useState(expertProfile?.expertName ?? "");
+  const [expertRegistrationNumber, setExpertRegistrationNumber] = useState(
+    expertProfile?.registrationNumber ?? "",
+  );
 
   function updateAddressee(key: string, patch: Partial<AddresseeDraft>) {
     setAddressees((prev) => prev.map((a) => (a.key === key ? { ...a, ...patch } : a)));

@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { EXPERT_PROFILE_ID } from "./expert-profile-schemas";
 
 export function getCaseDetail(id: string) {
   return prisma.case.findUnique({
@@ -23,7 +24,13 @@ export function getCaseDetail(id: string) {
         orderBy: { visitDate: "desc" },
         include: { testimonies: { orderBy: { order: "asc" } } },
       },
-      courtReport: { include: { tasks: { orderBy: { taskIndex: "asc" } } } },
+      courtReport: {
+        include: {
+          tasks: { orderBy: { taskIndex: "asc" } },
+          tables: { orderBy: [{ placement: "asc" }, { order: "asc" }] },
+          objections: { orderBy: [{ partyRole: "asc" }, { order: "asc" }] },
+        },
+      },
     },
   });
 }
@@ -41,6 +48,14 @@ export type DocumentDemandDetail = CaseDetail["documentDemands"][number];
 export type SiteInspectionDetail = CaseDetail["siteInspections"][number];
 export type CourtReportDetail = CaseDetail["courtReport"];
 export type CourtReportTaskDetail = NonNullable<CaseDetail["courtReport"]>["tasks"][number];
+export type CourtReportTableDetail = NonNullable<CaseDetail["courtReport"]>["tables"][number];
+export type ReportObjectionDetail = NonNullable<CaseDetail["courtReport"]>["objections"][number];
+
+export function getExpertProfile() {
+  return prisma.expertProfile.findUnique({ where: { id: EXPERT_PROFILE_ID } });
+}
+
+export type ExpertProfileDetail = Awaited<ReturnType<typeof getExpertProfile>>;
 
 export function getNoticeDetail(caseId: string, noticeId: string) {
   return prisma.notice.findFirst({ where: { id: noticeId, caseId } });

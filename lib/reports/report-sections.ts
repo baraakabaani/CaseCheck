@@ -79,17 +79,21 @@ export function buildDocumentInventoryText(inv: DocumentInventory): string {
   return lines.join("\n");
 }
 
+function formatPartyName(p: { name: string; capacityNote?: string | null }): string {
+  return p.capacityNote ? `${p.name} (${p.capacityNote})` : p.name;
+}
+
 export function buildPartiesOverviewText(
   basics: ReportAggregateBasics,
-  parties: { role: string; name: string }[],
+  parties: { role: string; name: string; capacityNote?: string | null }[],
   attendees: { name: string; role: string; representingParty: string | null; hasPoa: boolean }[],
 ): string {
   const lines: string[] = [];
   const claimants = parties.filter((p) => p.role === "CLAIMANT");
   const respondents = parties.filter((p) => p.role === "RESPONDENT");
 
-  lines.push(`${CASE_PARTY_ROLE_LABELS.CLAIMANT}: ${claimants.map((p) => p.name).join("، ") || "غير محدد"}`);
-  lines.push(`${CASE_PARTY_ROLE_LABELS.RESPONDENT}: ${respondents.map((p) => p.name).join("، ") || "غير محدد"}`);
+  lines.push(`${CASE_PARTY_ROLE_LABELS.CLAIMANT}: ${claimants.map(formatPartyName).join("، ") || "غير محدد"}`);
+  lines.push(`${CASE_PARTY_ROLE_LABELS.RESPONDENT}: ${respondents.map(formatPartyName).join("، ") || "غير محدد"}`);
 
   if (basics.appointmentCapacity === "SOLE_EXPERT") {
     lines.push("صفة الخبير: خبير حسابي منفرد.");
@@ -107,6 +111,26 @@ export function buildPartiesOverviewText(
   }
 
   return lines.join("\n");
+}
+
+/** أولاً: أطراف القضية — نص التقرير المرجعي: قائمة مرقّمة لكل صفة على
+ * حدة ("المدعيان:-" / "المدعى عليهما:-")، لا فقرة سردية مثل
+ * buildPartiesOverviewText (المُستخدَمة في القسم التمهيدي المختلف). */
+export function buildPartiesListingText(
+  parties: { role: string; name: string; capacityNote?: string | null }[],
+): string {
+  const claimants = parties.filter((p) => p.role === "CLAIMANT");
+  const respondents = parties.filter((p) => p.role === "RESPONDENT");
+  const numbered = (list: typeof parties) =>
+    list.length > 0 ? list.map((p, i) => `${i + 1}) ${formatPartyName(p)}`).join("\n") : "غير محدد";
+
+  return [
+    `${CASE_PARTY_ROLE_LABELS.CLAIMANT}:-`,
+    numbered(claimants),
+    "",
+    `${CASE_PARTY_ROLE_LABELS.RESPONDENT}:-`,
+    numbered(respondents),
+  ].join("\n");
 }
 
 export function buildIntroductionText(

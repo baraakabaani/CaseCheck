@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ApiKeySettingsDialog } from "@/components/ApiKeySettingsDialog";
+import { ExpertProfileDialog } from "@/components/ExpertProfileDialog";
 
 export function AppHeader({
   activeCaseLabel,
@@ -30,7 +31,8 @@ export function AppHeader({
           </div>
         )}
 
-        <div className="shrink-0">
+        <div className="flex shrink-0 gap-2">
+          <ExpertProfileDialog />
           <ApiKeySettingsDialog />
         </div>
       </div>

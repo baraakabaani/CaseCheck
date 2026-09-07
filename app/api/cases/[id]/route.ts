@@ -89,13 +89,25 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       if (claimants !== undefined) {
         await tx.caseParty.deleteMany({ where: { caseId: id, role: "CLAIMANT" } });
         await tx.caseParty.createMany({
-          data: claimants.map((name, order) => ({ caseId: id, role: "CLAIMANT", name, order })),
+          data: claimants.map((p, order) => ({
+            caseId: id,
+            role: "CLAIMANT",
+            name: p.name,
+            capacityNote: p.capacityNote,
+            order,
+          })),
         });
       }
       if (respondents !== undefined) {
         await tx.caseParty.deleteMany({ where: { caseId: id, role: "RESPONDENT" } });
         await tx.caseParty.createMany({
-          data: respondents.map((name, order) => ({ caseId: id, role: "RESPONDENT", name, order })),
+          data: respondents.map((p, order) => ({
+            caseId: id,
+            role: "RESPONDENT",
+            name: p.name,
+            capacityNote: p.capacityNote,
+            order,
+          })),
         });
       }
       return tx.case.update({ where: { id }, data, include: { parties: { orderBy: { order: "asc" } } } });

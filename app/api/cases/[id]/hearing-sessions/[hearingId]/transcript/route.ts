@@ -3,16 +3,25 @@ import { prisma } from "@/lib/db";
 import { extractDocument } from "@/lib/document-parser";
 import { correctHearingTranscript } from "@/lib/hearing-transcript-ai";
 import { getClientApiKeysFromRequest } from "@/lib/ai-client";
+import {
+  transcribeHearingAudio,
+  resolveGroqKeyForTranscription,
+  AudioTranscriptionError,
+} from "@/lib/audio-transcription";
 import { hearingTranscriptTextInputSchema } from "@/lib/hub-schemas";
 
 interface RouteParams {
   params: Promise<{ id: string; hearingId: string }>;
 }
 
-// رفع نص تفريغ الاجتماع — إما كملف (multipart، يُستخرج نصه عبر نفس محرك
-// استخراج مستندات الموديول 1) أو كنص مباشر (JSON) — ثم تصحيحه بالذكاء
-// الاصطناعي بالاستعانة بسياق الدعوى، ومحاولة مطابقة الإجابات مع الأسئلة
-// المُعدّة مسبقاً لهذا الاجتماع.
+// رفع تفريغ الاجتماع — بإحدى ثلاث صور: نص مباشر (JSON)، ملف مستند
+// (multipart، يُستخرج نصه عبر نفس محرك استخراج مستندات الموديول 1)، أو
+// تسجيل/ملف صوتي (multipart أيضاً — يُميَّز عبر نوع الملف الابتدائي
+// "audio/..."، سواء كان تسجيلاً مباشراً من المتصفح أو ملفاً صوتياً جاهزاً)
+// يُفرَّغ أولاً إلى نص خام عبر Whisper (lib/audio-transcription.ts). في كل
+// الحالات الثلاث، النص الخام الناتج يمر بعدها عبر نفس مسار التصحيح
+// بالذكاء الاصطناعي دون أي فرق، بالاستعانة بسياق الدعوى، ومحاولة مطابقة
+// الإجابات مع الأسئلة المُعدّة مسبقاً لهذا الاجتماع.
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const { id: caseId, hearingId } = await params;
 
@@ -32,6 +41,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const contentType = req.headers.get("content-type") || "";
   let rawText: string;
+  let transcribedFromAudio = false;
 
   if (contentType.includes("multipart/form-data")) {
     const formData = await req.formData();
@@ -39,15 +49,37 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "لم يتم إرفاق ملف" }, { status: 400 });
     }
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const extracted = await extractDocument(buffer, file.name);
-    if (!extracted.text?.trim()) {
-      return NextResponse.json(
-        { error: extracted.error || "تعذر استخراج نص من الملف المرفوع" },
-        { status: 400 },
-      );
+
+    if (file.type.startsWith("audio/")) {
+      const groqApiKey = resolveGroqKeyForTranscription(getClientApiKeysFromRequest(req));
+      if (!groqApiKey) {
+        return NextResponse.json(
+          {
+            error:
+              "تفريغ التسجيلات الصوتية يتطلب مفتاح Groq — لا يوجد مفتاح مُهيأ حالياً. أضف واحداً من زر «مفتاح الذكاء الاصطناعي» أعلى الصفحة، أو الصق/ارفع نص التفريغ يدوياً بدلاً من ذلك.",
+          },
+          { status: 400 },
+        );
+      }
+      try {
+        const { text } = await transcribeHearingAudio(file, groqApiKey);
+        rawText = text;
+        transcribedFromAudio = true;
+      } catch (err) {
+        const message = err instanceof AudioTranscriptionError ? err.message : "تعذر تفريغ التسجيل الصوتي";
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
+    } else {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const extracted = await extractDocument(buffer, file.name);
+      if (!extracted.text?.trim()) {
+        return NextResponse.json(
+          { error: extracted.error || "تعذر استخراج نص من الملف المرفوع" },
+          { status: 400 },
+        );
+      }
+      rawText = extracted.text;
     }
-    rawText = extracted.text;
   } else {
     const body = await req.json().catch(() => ({}));
     const parsed = hearingTranscriptTextInputSchema.safeParse(body);
@@ -130,5 +162,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     questions,
     mode: outcome.mode,
     warning: outcome.warning ?? null,
+    transcribedFromAudio,
   });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +27,9 @@ import {
   Sparkles,
   FileDown,
   CheckCircle2,
+  Mic,
+  Square,
+  FileAudio,
 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
 import { buildHearingMinutesDocxBlob, downloadBlob } from "@/lib/docx-export";
@@ -522,6 +525,92 @@ function TranscriptCard({
   const [text, setText] = useState("");
   const [correcting, setCorrecting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const audioFileInput = useRef<HTMLInputElement>(null);
+
+  // --- تسجيل الاجتماع مباشرة من المتصفح (MediaRecorder) ---
+  const [recordingState, setRecordingState] = useState<"idle" | "recording" | "recorded">("idle");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const recordingSupported =
+    typeof window !== "undefined" && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder;
+
+  function stopTimer() {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }
+
+  function releaseMic() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
+
+  // تنظيف عند إغلاق البطاقة أثناء تسجيل جارٍ — يُطفئ الميكروفون ويحرر الذاكرة
+  // بدل تركهما معلَّقين.
+  useEffect(() => {
+    return () => {
+      stopTimer();
+      releaseMic();
+    };
+  }, []);
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+      // معدّل بت منخفض عمداً (كلام وليس موسيقى) — يبقي حجم التسجيل صغيراً
+      // حتى لاجتماعات تمتد ساعة أو أكثر، تجنباً لتجاوز حد حجم الملف لدى
+      // مزود خدمة التفريغ.
+      const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32_000 });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        setRecordedBlob(blob);
+        setRecordedUrl(URL.createObjectURL(blob));
+        setRecordingState("recorded");
+        releaseMic();
+        stopTimer();
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start(1000);
+      setElapsedSeconds(0);
+      setRecordingState("recording");
+      timerRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    } catch {
+      toast.error("تعذر الوصول إلى الميكروفون — تأكد من منح المتصفح إذن استخدامه");
+    }
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
+  }
+
+  function discardRecording() {
+    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+    setRecordedBlob(null);
+    setRecordedUrl(null);
+    setRecordingState("idle");
+    setElapsedSeconds(0);
+  }
+
+  function formatElapsed(totalSeconds: number) {
+    const m = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
+    const s = (totalSeconds % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  }
 
   async function submitTranscript(payload: { text: string } | { file: File }) {
     setCorrecting(true);
@@ -549,9 +638,11 @@ function TranscriptCard({
         const parts: string[] = [];
         if (data.matchedAnswersCount > 0) parts.push(`مطابقة ${data.matchedAnswersCount} إجابة`);
         if (data.extractedQuestionsCount > 0) parts.push(`استخراج ${data.extractedQuestionsCount} سؤال جديد`);
-        toast.success(`تم تصحيح النص${parts.length > 0 ? ` و${parts.join(" و")}` : ""}`);
+        const base = data.transcribedFromAudio ? "تم تفريغ التسجيل الصوتي وتصحيح نصه" : "تم تصحيح النص";
+        toast.success(`${base}${parts.length > 0 ? ` و${parts.join(" و")}` : ""}`);
       }
       setText("");
+      if (recordingState === "recorded") discardRecording();
       onChanged();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "فشل تصحيح النص");
@@ -567,12 +658,81 @@ function TranscriptCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <p className="text-xs text-muted-foreground">
-          ارفع نص تفريغ آلي للاجتماع (لصقاً أو كملف) — سيُصحَّح تلقائياً بالذكاء الاصطناعي
-          بالاستعانة بسياق الدعوى (أسماء الأطراف، ملخص الدعوى)، وتُطابَق الإجابات الفعلية مع
-          الأسئلة المُعدّة أعلاه، مع استخراج أي أسئلة وأجوبة ارتجالية أخرى وردت فعلياً في
-          النص ولم تكن ضمن الأسئلة المُعدّة مسبقاً — تُضاف تلقائياً كأسئلة جديدة (موسومة
-          «مستخرج من نص التفريغ» أعلاه).
+          سجّل صوت الاجتماع مباشرة، أو ارفع تسجيلاً صوتياً جاهزاً، أو ارفع/الصق نص تفريغ
+          آلي جاهز — في كل الحالات يُصحَّح النص تلقائياً بالذكاء الاصطناعي بالاستعانة بسياق
+          الدعوى (أسماء الأطراف، ملخص الدعوى)، وتُطابَق الإجابات الفعلية مع الأسئلة المُعدّة
+          أعلاه، مع استخراج أي أسئلة وأجوبة ارتجالية أخرى وردت فعلياً في النص ولم تكن ضمن
+          الأسئلة المُعدّة مسبقاً — تُضاف تلقائياً كأسئلة جديدة (موسومة «مستخرج من نص
+          التفريغ» أعلاه).
         </p>
+
+        <div className="flex flex-col gap-2 rounded-md border p-3">
+          <Label className="text-xs">تسجيل صوتي</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            {recordingState === "idle" && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={startRecording}
+                disabled={!recordingSupported || correcting}
+              >
+                <Mic className="size-4" />
+                تسجيل الاجتماع مباشرة
+              </Button>
+            )}
+            {recordingState === "recording" && (
+              <Button type="button" variant="destructive" onClick={stopRecording}>
+                <span className="size-2 animate-pulse rounded-full bg-white" />
+                <Square className="size-4 fill-current" />
+                إيقاف التسجيل — {formatElapsed(elapsedSeconds)}
+              </Button>
+            )}
+            <input
+              type="file"
+              ref={audioFileInput}
+              className="hidden"
+              accept="audio/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) submitTranscript({ file });
+                e.target.value = "";
+              }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => audioFileInput.current?.click()}
+              disabled={correcting || recordingState === "recording"}
+            >
+              <FileAudio className="size-4" />
+              رفع تسجيل صوتي
+            </Button>
+          </div>
+
+          {!recordingSupported && (
+            <p className="text-xs text-amber-600">
+              التسجيل المباشر غير مدعوم في هذا المتصفح (أو يتطلب اتصالاً آمناً HTTPS) — يمكن
+              رفع تسجيل صوتي جاهز بدلاً من ذلك.
+            </p>
+          )}
+
+          {recordingState === "recorded" && recordedUrl && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/30 p-2">
+              <audio controls src={recordedUrl} className="h-9 max-w-full" />
+              <Button
+                size="sm"
+                onClick={() => recordedBlob && submitTranscript({ file: new File([recordedBlob], `hearing-recording-${Date.now()}.webm`, { type: recordedBlob.type }) })}
+                disabled={correcting}
+              >
+                {correcting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                استخدام هذا التسجيل وتفريغه
+              </Button>
+              <Button size="sm" variant="ghost" onClick={discardRecording} disabled={correcting}>
+                <Trash2 className="size-4" />
+                تسجيل من جديد
+              </Button>
+            </div>
+          )}
+        </div>
 
         <Textarea
           rows={4}

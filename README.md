@@ -169,14 +169,26 @@ milestone cards, each linking into its own module page:
    (`HearingQuestion`), document demands with deadlines
    (`DocumentDemand`, also surfaced in Module 3), and an
    **AI transcript-correction pipeline** (`lib/hearing-transcript-ai.ts`):
-   upload a hearing transcript (pasted text or a file, parsed via the same
-   `extractDocument()` used for case documents) — often messy Arabic
-   speech-to-text — and it's corrected using the case's own context
-   (party names, case summary, mandate, the prepared questions) as ground
-   truth, with any answered questions matched back automatically (fuzzy
-   text matching via `lib/text-normalize.ts`, since the model can't know
-   internal IDs). "Finish meeting" deterministically compiles all of this
-   into a `.docx` محضر with the Parker Russell header
+   feed it a hearing transcript — pasted text, an uploaded text/PDF/docx
+   file (`extractDocument()`, same as case documents), a live in-browser
+   recording of the meeting (`MediaRecorder`, low-bitrate opus so an
+   hours-long hearing stays a manageable file size), or an already-recorded
+   audio file — and it's corrected using the case's own context (party
+   names, case summary, mandate, the prepared questions) as ground truth,
+   with any answered questions matched back automatically (fuzzy text
+   matching via `lib/text-normalize.ts`, since the model can't know
+   internal IDs). The two audio paths are transcribed first via Groq's
+   Whisper endpoint (`lib/audio-transcription.ts`,
+   `client.audio.transcriptions.create`, `language: "ar"`) into the exact
+   same raw text the paste/upload paths produce, then flow through the
+   identical correction step — one shared pipeline regardless of input
+   shape. Audio transcription needs a Groq key specifically (Gemini has no
+   equivalent endpoint in this app's `lib/ai-client.ts` abstraction, which
+   is chat-completions only); with no Groq key configured, this one path
+   fails honestly with a clear message rather than fabricating a
+   transcript, since — unlike text correction — there's no meaningful
+   "as-is" fallback for a sound file. "Finish meeting" deterministically
+   compiles all of this into a `.docx` محضر with the Parker Russell header
    (`buildHearingMinutesDocxBlob`) — not a second AI call, for the same
    reliability reason the إخطار template is deterministic.
 3. **الموديول 3 — المتابعة والمعاينة الميدانية** (`/cases/[id]/module-3`,

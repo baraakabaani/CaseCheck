@@ -14,7 +14,34 @@ import {
   ShadingType,
   WidthType,
 } from "docx";
+import JSZip from "jszip";
 import { arabicOrdinal } from "./arabic-ordinals";
+
+/** يُصلح ثغرة حقيقية في حزمة docx: كل فقرة/جدول في هذا الملف يحمل بالفعل
+ * علم الاتجاه الصحيح (w:bidi على الفقرة، w:rtl على كل نص، w:bidiVisual على
+ * الجدول) — لكن الحزمة لا تدعم إطلاقاً ضبط اتجاه *القسم* نفسه (w:sectPr لا
+ * يقبل w:bidi عبر أي خيار عام). بلا هذا العلم، فتح المستند في Word يعرض
+ * المحتوى القائم بمحاذاة يمين صحيحة، لكن أي فقرة جديدة يكتبها المستخدم بعد
+ * ذلك (أو اتجاه الصفحة العام) يعود افتراضياً لليسار، وهذا بالضبط ما يجعل
+ * الملف "لا يبدو عربياً بالكامل" رغم صحة كل فقرة موجودة فيه. الحل: فك ضغط
+ * الملف الناتج فعلياً (docx هو أرشيف zip)، حقن <w:bidi/> داخل كل <w:sectPr>
+ * في document.xml مباشرة (لا خيار مكافئ في واجهة الحزمة البرمجية)، ثم
+ * إعادة الضغط — يُطبَّق هذا على كل تصدير Word في هذا الملف، لا الموديول 4
+ * وحده، لأن الخلل نفسه موجود في كل مستند RTL يُنتجه docx.js بهذه الطريقة. */
+async function finalizeArabicDocx(blob: Blob): Promise<Blob> {
+  const zip = await JSZip.loadAsync(blob);
+  const docXmlPath = "word/document.xml";
+  const docXml = await zip.file(docXmlPath)?.async("string");
+  if (!docXml) return blob; // بنية غير متوقعة — لا تُفشِل التصدير، أعد الأصل كما هو
+
+  const patched = docXml.replace(/<w:sectPr(\s[^>]*)?>/g, (match) => `${match}<w:bidi/>`);
+  zip.file(docXmlPath, patched);
+
+  return zip.generateAsync({
+    type: "blob",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
+}
 
 export interface EmailDocxInput {
   subject: string;
@@ -97,7 +124,7 @@ export async function buildEmailDocxBlob({ subject, bodyAr }: EmailDocxInput): P
     ],
   });
 
-  return Packer.toBlob(doc);
+  return finalizeArabicDocx(await Packer.toBlob(doc));
 }
 
 // ---------------------------------------------------------------------------
@@ -519,7 +546,7 @@ export async function buildCourtReportDocxBlob({
     ],
   });
 
-  return Packer.toBlob(doc);
+  return finalizeArabicDocx(await Packer.toBlob(doc));
 }
 
 /** Shared shape behind every "compiled from structured data" export
@@ -575,7 +602,7 @@ async function buildBrandedTextReportDocxBlob({
     ],
   });
 
-  return Packer.toBlob(doc);
+  return finalizeArabicDocx(await Packer.toBlob(doc));
 }
 
 export interface HearingMinutesDocxInput {

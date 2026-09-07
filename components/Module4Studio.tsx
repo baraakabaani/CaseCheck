@@ -24,18 +24,23 @@ import {
 } from "lucide-react";
 import { buildCourtReportDocxBlob, downloadBlob } from "@/lib/docx-export";
 import { buildClientApiKeyHeaders } from "@/lib/client-api-key";
-import { COURT_REPORT_STATUS_LABELS } from "@/lib/case-hub-labels";
+import { COURT_REPORT_STATUS_LABELS, TIMELINE_EVENT_LABELS } from "@/lib/case-hub-labels";
+import { CASE_PARTY_ROLE_LABELS } from "@/lib/case-intake-labels";
 import { computeLiquidation, formatAed, beneficiaryLabel } from "@/lib/reports/liquidation";
 import { isExportBlocked } from "@/lib/reports/provenance";
+import { buildAttachmentPlan } from "@/lib/reports/attachments";
+import { formatDate } from "@/lib/format";
 import { ReportPreliminarySections } from "@/components/ReportPreliminarySections";
+import { ReportCoverSettings } from "@/components/ReportCoverSettings";
 import { ReportTaskSection } from "@/components/ReportTaskSection";
 import { ForensicLiquidationTable } from "@/components/ForensicLiquidationTable";
 import { ReportDocumentsIndex } from "@/components/ReportDocumentsIndex";
 import { ReportObjectionsPanel } from "@/components/ReportObjectionsPanel";
 import { ReportConclusionSection } from "@/components/ReportConclusionSection";
-import type { CaseDetail } from "@/lib/queries";
+import type { CaseDetail, ExpertProfileDetail } from "@/lib/queries";
 import type { CourtReportStatus } from "@/lib/hub-schemas";
-import type { DocumentInventory } from "@/lib/reports/report-aggregator";
+import type { ProceduralTimelineEvent } from "@/lib/reports/report-aggregator";
+import type { CourtReportDocxTableRow, CourtReportDocxFinancialTable } from "@/lib/docx-export";
 
 function safeParseJson<T>(json: string | null | undefined, fallback: T): T {
   if (!json) return fallback;
@@ -46,7 +51,34 @@ function safeParseJson<T>(json: string | null | undefined, fallback: T): T {
   }
 }
 
-export function Module4Studio({ caseDetail }: { caseDetail: CaseDetail }) {
+interface StoredTableColumn {
+  key: string;
+  label: string;
+}
+
+function toDocxTable(table: {
+  title: string;
+  subtitle: string | null;
+  columnsJson: string;
+  rowsJson: string;
+  basisNote: string | null;
+}): CourtReportDocxFinancialTable {
+  return {
+    title: table.title,
+    subtitle: table.subtitle,
+    columnLabels: safeParseJson<StoredTableColumn[]>(table.columnsJson, []).map((c) => c.label),
+    rows: safeParseJson<CourtReportDocxTableRow[]>(table.rowsJson, []),
+    basisNote: table.basisNote,
+  };
+}
+
+export function Module4Studio({
+  caseDetail,
+  expertProfile,
+}: {
+  caseDetail: CaseDetail;
+  expertProfile: ExpertProfileDetail;
+}) {
   const router = useRouter();
   const report = caseDetail.courtReport;
   const tasks = report?.tasks ?? [];
@@ -124,33 +156,54 @@ export function Module4Studio({ caseDetail }: { caseDetail: CaseDetail }) {
 
   async function handleExport() {
     if (!report) return;
+    if (!expertProfile?.expertName || !expertProfile?.registrationNumber) {
+      toast.warning("لم تُعرَّف بيانات الخبير بعد — أضفها من «بيانات الخبير» في تبويب الأقسام التمهيدية للحصول على توقيع كامل في الملف المُصدَّر.");
+    }
     setExporting(true);
     try {
       const documentById = new Map(documents.map((d) => [d.id, d]));
-      const inventory = safeParseJson<DocumentInventory | null>(report.inventoryJson, null);
+      const attachmentPlan = buildAttachmentPlan(
+        tasks.map((t) => ({ taskIndex: t.taskIndex, linkedDocumentIds: safeParseJson<string[]>(t.linkedDocumentIds, []) })),
+        documentById,
+      );
+      const timeline = safeParseJson<ProceduralTimelineEvent[]>(report.timelineJson, []);
+      const scopeTables = report.tables.filter((t) => t.placement === "SCOPE").map(toDocxTable);
 
       const blob = await buildCourtReportDocxBlob({
         caseNumber: caseDetail.caseNumber,
         caseTitle: caseDetail.title,
-        preliminary: [
-          { title: "المقدمة", narrative: report.introduction },
-          { title: "ملخص المأمورية", narrative: report.mandateSummary },
-          { title: "الأطراف وصفاتهم", narrative: report.partiesOverview },
-          { title: "الإجراءات", narrative: report.proceduralHistory },
-          { title: "حافظة المستندات (نظرة عامة)", narrative: report.documentInventory },
-        ],
-        tasks: tasks.map((t) => ({
-          index: t.taskIndex,
-          taskText: t.taskText,
-          claimantPosition: t.claimantPosition,
-          respondentPosition: t.respondentPosition,
-          exhibitFileNames: safeParseJson<string[]>(t.linkedDocumentIds, [])
-            .map((id) => documentById.get(id)?.fileName)
-            .filter((n): n is string => Boolean(n)),
-          forensicAnalysis: t.forensicAnalysis,
-          missingDocsImpact: t.missingDocsImpact,
-          expertVerdict: t.expertVerdict,
+        court: caseDetail.court,
+        judgeName: report.judgeName,
+        judgeTitle: report.judgeTitle,
+        letterDateLabel: report.letterDate ? formatDate(report.letterDate) : null,
+        parties: caseDetail.parties.map((p) => ({
+          roleLabel: CASE_PARTY_ROLE_LABELS[p.role as "CLAIMANT" | "RESPONDENT"],
+          name: p.name,
+          capacityNote: p.capacityNote,
         })),
+        introduction: report.introduction,
+        mandateSummary: report.mandateSummary,
+        proceduralHistory: report.proceduralHistory,
+        timeline: timeline.map((e) => ({ dateLabel: formatDate(e.at), label: TIMELINE_EVENT_LABELS[e.kind], detail: e.detail })),
+        scopeNarrative: report.scopeNarrative,
+        scopeTables,
+        tasks: tasks.map((t) => {
+          const linkedDocumentIds = safeParseJson<string[]>(t.linkedDocumentIds, []);
+          return {
+            index: t.taskIndex,
+            taskText: t.taskText,
+            claimantPosition: t.claimantPosition,
+            respondentPosition: t.respondentPosition,
+            exhibitFileNames: linkedDocumentIds.map((id) => documentById.get(id)?.fileName).filter((n): n is string => Boolean(n)),
+            attachmentNumbers: linkedDocumentIds
+              .map((id) => attachmentPlan.numberByDocumentId.get(id))
+              .filter((n): n is number => n !== undefined),
+            forensicAnalysis: t.forensicAnalysis,
+            tables: report.tables.filter((table) => table.courtReportTaskId === t.id).map(toDocxTable),
+            missingDocsImpact: t.missingDocsImpact,
+            expertVerdict: t.expertVerdict,
+          };
+        }),
         liquidation: {
           rows: liquidation.rows.map((r) => ({
             taskLabel: `مهمة ${r.taskIndex + 1}: ${r.taskLabel}`,
@@ -163,11 +216,18 @@ export function Module4Studio({ caseDetail }: { caseDetail: CaseDetail }) {
           netResultLabel: `${formatAed(Math.abs(liquidation.netDue))} ${beneficiaryLabel(liquidation.beneficiaryRole)}`,
           narrative: report.settlementNarrative,
         },
-        documentsIndex: (inventory?.entries ?? []).map((e) => ({
-          label: e.label,
-          statusLabel: e.status,
-          documentNames: e.documents.map((d) => d.fileName).join("، ") || "—",
+        objectionsIntro: report.objectionsIntro,
+        objections: report.objections.map((o) => ({
+          partyRoleLabel: CASE_PARTY_ROLE_LABELS[o.partyRole as "CLAIMANT" | "RESPONDENT"],
+          submittedOnBehalfOfLabel: o.submittedOnBehalfOfLabel,
+          memoDateLabel: o.objectionMemoDate ? formatDate(o.objectionMemoDate) : null,
+          objectionText: o.objectionText,
+          responseText: o.responseText,
         })),
+        conclusionIntro: report.conclusionIntro,
+        conclusionItems: safeParseJson<string[]>(report.conclusionItemsJson, []),
+        conclusionClosing: report.conclusionClosing,
+        documentsIndex: attachmentPlan.entries.map((e) => ({ number: e.number, fileName: e.fileName })),
       });
       downloadBlob(blob, `تقرير-الخبرة-${caseDetail.caseNumber}.docx`);
       toast.success("تم تصدير التقرير بصيغة Word");
@@ -294,11 +354,19 @@ export function Module4Studio({ caseDetail }: { caseDetail: CaseDetail }) {
           </TabsList>
 
           <TabsContent value="preliminary">
-            <Card>
-              <CardContent>
-                <ReportPreliminarySections caseId={caseDetail.id} report={report} />
-              </CardContent>
-            </Card>
+            <div className="flex flex-col gap-4">
+              <ReportCoverSettings
+                caseId={caseDetail.id}
+                report={report}
+                expertProfile={expertProfile}
+                onChanged={() => router.refresh()}
+              />
+              <Card>
+                <CardContent>
+                  <ReportPreliminarySections caseId={caseDetail.id} report={report} />
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           <TabsContent value="tasks">

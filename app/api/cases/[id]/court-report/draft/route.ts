@@ -333,6 +333,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       include: {
         tasks: { orderBy: { taskIndex: "asc" } },
         tables: { orderBy: [{ placement: "asc" }, { order: "asc" }] },
+        objections: { orderBy: [{ partyRole: "asc" }, { order: "asc" }] },
       },
     });
   });

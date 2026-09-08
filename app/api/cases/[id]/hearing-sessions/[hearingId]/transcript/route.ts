@@ -5,7 +5,7 @@ import { correctHearingTranscript } from "@/lib/hearing-transcript-ai";
 import { getClientApiKeysFromRequest } from "@/lib/ai-client";
 import {
   transcribeHearingAudio,
-  resolveGroqKeyForTranscription,
+  resolveGroqKeysForTranscription,
   AudioTranscriptionError,
 } from "@/lib/audio-transcription";
 import { hearingTranscriptTextInputSchema } from "@/lib/hub-schemas";
@@ -51,8 +51,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }
 
     if (file.type.startsWith("audio/")) {
-      const groqApiKey = resolveGroqKeyForTranscription(getClientApiKeysFromRequest(req));
-      if (!groqApiKey) {
+      const groqApiKeys = resolveGroqKeysForTranscription(getClientApiKeysFromRequest(req));
+      if (groqApiKeys.length === 0) {
         return NextResponse.json(
           {
             error:
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         );
       }
       try {
-        const { text } = await transcribeHearingAudio(file, groqApiKey);
+        const { text } = await transcribeHearingAudio(file, groqApiKeys);
         rawText = text;
         transcribedFromAudio = true;
       } catch (err) {

@@ -48,7 +48,16 @@ export async function extractPdfText(buffer: Buffer): Promise<PdfExtractResult> 
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
   try {
     const result = await parser.getText();
-    const text = (result.text || "").trim();
+    // بعض ملفات PDF العربية (خاصة القرارات/الأحكام القديمة أو المُصدَّرة من
+    // برامج معينة) تُضمِّن الخط بحيث يستخرج pdf.js/pdf-parse كل حرف كصيغة
+    // عرض معزولة (Arabic Presentation Forms، النطاق U+FE70–FEFF أو
+    // U+FB50–FDFF) بدل الحرف العربي الأساسي — النص يبقى بترتيبه المنطقي
+    // الصحيح فعلياً، لكنه يظهر كرموز غير مفهومة لأي مستهلك لاحق (الذكاء
+    // الاصطناعي، البحث بالكلمات المفتاحية، العرض في الواجهة). تحقّق حي على
+    // ملف حقيقي أكّد أن .normalize("NFKC") وحدها — بلا أي عكس لترتيب
+    // الأحرف — تُعيد النص العربي الصحيح الكامل حرفياً. هذا يُطبَّق دائماً
+    // (لا يُغيّر شيئاً في PDF عادي مستخرَج بصورة سليمة أصلاً).
+    const text = (result.text || "").normalize("NFKC").trim();
     const pageCount = result.total || 1;
 
     return {

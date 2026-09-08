@@ -4,6 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -14,18 +17,39 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import Link from "next/link";
-import { Loader2, CheckCircle2, Sparkles, Mail, ArrowRight } from "lucide-react";
+import { Loader2, CheckCircle2, Sparkles, Mail, ArrowRight, Pencil, Plus, Trash2, X, Save } from "lucide-react";
 import type {
   MissingDocumentItem,
   ReceivedDocumentSummary,
 } from "@/lib/case-analysis-schemas";
-import { DOC_CATEGORY_LABELS } from "@/lib/case-intake-labels";
+import { DOC_CATEGORY_LABELS, CASE_PARTY_ROLE_LABELS } from "@/lib/case-intake-labels";
 import type { DocCategory } from "@/lib/schemas";
 import type { CaseAnalysisDetail, CasePartyDetail, DocumentDetail } from "@/lib/queries";
 
-function parseAnalysis(analysis: CaseAnalysisDetail) {
+interface ParsedAnalysis {
+  caseSummary: string;
+  mandateText: string;
+  mandateTasks: string[];
+  receivedDocuments: ReceivedDocumentSummary[];
+  missingDocuments: MissingDocumentItem[];
+  unclearPoints: string[];
+  claimantQuestions: string[];
+  respondentQuestions: string[];
+  expertNotes: string[];
+}
+
+function parseAnalysis(analysis: CaseAnalysisDetail): ParsedAnalysis {
   return {
+    caseSummary: analysis.caseSummary,
+    mandateText: analysis.mandateText,
     mandateTasks: JSON.parse(analysis.mandateTasks) as string[],
     receivedDocuments: JSON.parse(analysis.receivedDocumentsSummary) as ReceivedDocumentSummary[],
     missingDocuments: JSON.parse(analysis.missingDocuments) as MissingDocumentItem[],
@@ -34,6 +58,51 @@ function parseAnalysis(analysis: CaseAnalysisDetail) {
     respondentQuestions: JSON.parse(analysis.respondentQuestions) as string[],
     expertNotes: JSON.parse(analysis.expertNotes) as string[],
   };
+}
+
+/** محرر قائمة نصوص بسيطة (مهام المأمورية، نقاط الإيضاح، الأسئلة المقترحة،
+ * ملاحظات الخبير) — نفس الشكل في كل الحالات: سطر واحد لكل عنصر، حذف/إضافة
+ * حرة. يُستخدَم بدل عرض <ol>/<ul> للقراءة فقط حين وضع التعديل مفعَّل. */
+function EditableStringList({
+  items,
+  onChange,
+  placeholder,
+  ordered,
+}: {
+  items: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+  ordered?: boolean;
+}) {
+  function update(i: number, value: string) {
+    onChange(items.map((it, idx) => (idx === i ? value : it)));
+  }
+  function remove(i: number) {
+    onChange(items.filter((_, idx) => idx !== i));
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {items.map((item, i) => (
+        <div key={i} className="flex items-start gap-2">
+          {ordered && <span className="mt-2 shrink-0 text-xs tabular-nums text-muted-foreground">{i + 1}.</span>}
+          <Textarea
+            rows={2}
+            value={item}
+            onChange={(e) => update(i, e.target.value)}
+            placeholder={placeholder}
+            className="flex-1 text-justify leading-6"
+          />
+          <Button type="button" variant="ghost" size="icon" className="mt-1 shrink-0" onClick={() => remove(i)}>
+            <X className="size-4" />
+          </Button>
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => onChange([...items, ""])}>
+        <Plus className="size-4" />
+        إضافة
+      </Button>
+    </div>
+  );
 }
 
 export function CaseAnalysisReview({
@@ -49,10 +118,56 @@ export function CaseAnalysisReview({
 }) {
   const router = useRouter();
   const [approving, setApproving] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<ParsedAnalysis>(() => parseAnalysis(analysis));
 
-  const parsed = parseAnalysis(analysis);
+  const parsed = editing ? draft : parseAnalysis(analysis);
   const documentById = new Map(documents.map((d) => [d.id, d]));
   const partyById = new Map(parties.map((p) => [p.id, p]));
+
+  function startEditing() {
+    setDraft(parseAnalysis(analysis));
+    setEditing(true);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/cases/${caseId}/analysis/${analysis.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caseSummary: draft.caseSummary,
+          mandateText: draft.mandateText,
+          mandateTasks: draft.mandateTasks.map((t) => t.trim()).filter(Boolean),
+          receivedDocuments: draft.receivedDocuments,
+          missingDocuments: draft.missingDocuments
+            .map((m) => ({ ...m, item: m.item.trim() }))
+            .filter((m) => m.item),
+          unclearPoints: draft.unclearPoints.map((p) => p.trim()).filter(Boolean),
+          claimantQuestions: draft.claimantQuestions.map((q) => q.trim()).filter(Boolean),
+          respondentQuestions: draft.respondentQuestions.map((q) => q.trim()).filter(Boolean),
+          expertNotes: draft.expertNotes.map((n) => n.trim()).filter(Boolean),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل حفظ التعديلات");
+
+      toast.success("تم حفظ التعديلات — ستُستخدَم هذه النسخة المعدَّلة في بقية الموديولات");
+      setEditing(false);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "فشل حفظ التعديلات");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancelEditing() {
+    setDraft(parseAnalysis(analysis));
+    setEditing(false);
+  }
 
   async function handleApprove() {
     setApproving(true);
@@ -72,6 +187,38 @@ export function CaseAnalysisReview({
     }
   }
 
+  function updateMissingDoc(i: number, patch: Partial<MissingDocumentItem>) {
+    setDraft((prev) => ({
+      ...prev,
+      missingDocuments: prev.missingDocuments.map((m, idx) => (idx === i ? { ...m, ...patch } : m)),
+    }));
+  }
+  function removeMissingDoc(i: number) {
+    setDraft((prev) => ({ ...prev, missingDocuments: prev.missingDocuments.filter((_, idx) => idx !== i) }));
+  }
+  function toggleMissingDocParty(i: number, partyId: string) {
+    setDraft((prev) => ({
+      ...prev,
+      missingDocuments: prev.missingDocuments.map((m, idx) => {
+        if (idx !== i) return m;
+        const has = m.requestedFromPartyIds.includes(partyId);
+        return {
+          ...m,
+          requestedFromPartyIds: has
+            ? m.requestedFromPartyIds.filter((id) => id !== partyId)
+            : [...m.requestedFromPartyIds, partyId],
+        };
+      }),
+    }));
+  }
+
+  function updateReceivedDoc(i: number, patch: Partial<ReceivedDocumentSummary>) {
+    setDraft((prev) => ({
+      ...prev,
+      receivedDocuments: prev.receivedDocuments.map((rd, idx) => (idx === i ? { ...rd, ...patch } : rd)),
+    }));
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {analysis.mode === "OFFLINE" && (
@@ -81,12 +228,34 @@ export function CaseAnalysisReview({
         </div>
       )}
 
+      <div className="flex items-center justify-between rounded-md border border-purple-200 bg-purple-50 p-3 text-sm text-purple-800 dark:border-purple-900 dark:bg-purple-950/40 dark:text-purple-300">
+        <span>
+          هذا تحليل مُعَد بالذكاء الاصطناعي — إن كانت أي نتيجة غير دقيقة (مهمة ناقصة، ملخص غير
+          صحيح، سؤال غير مناسب...) عدّلها مباشرة قبل أو بعد الاعتماد.
+        </span>
+        {!editing && (
+          <Button type="button" variant="outline" size="sm" onClick={startEditing} className="shrink-0">
+            <Pencil className="size-3.5" />
+            تعديل
+          </Button>
+        )}
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>ملخص الدعوى</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-justify leading-7 whitespace-pre-wrap">{analysis.caseSummary}</p>
+          {editing ? (
+            <Textarea
+              rows={5}
+              value={draft.caseSummary}
+              onChange={(e) => setDraft((p) => ({ ...p, caseSummary: e.target.value }))}
+              className="text-justify leading-6"
+            />
+          ) : (
+            <p className="text-justify leading-7 whitespace-pre-wrap">{parsed.caseSummary}</p>
+          )}
         </CardContent>
       </Card>
 
@@ -95,15 +264,39 @@ export function CaseAnalysisReview({
           <CardTitle>مأمورية الخبرة</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <p className="text-justify leading-7 whitespace-pre-wrap">{analysis.mandateText}</p>
-          {parsed.mandateTasks.length > 0 && (
-            <ol className="flex flex-col gap-1 ps-5">
-              {parsed.mandateTasks.map((task, i) => (
-                <li key={i} className="list-decimal">
-                  {task}
-                </li>
-              ))}
-            </ol>
+          {editing ? (
+            <>
+              <Label className="text-xs text-muted-foreground">نص المأمورية</Label>
+              <Textarea
+                rows={5}
+                value={draft.mandateText}
+                onChange={(e) => setDraft((p) => ({ ...p, mandateText: e.target.value }))}
+                className="text-justify leading-6"
+              />
+              <Label className="mt-2 text-xs text-muted-foreground">
+                المهام (هذه القائمة هي ما يُبنى عليه هيكل تقرير الموديول 4 مباشرة — أضف إليها أي
+                مهمة استجدت في محضر الجلسة ولم يلتقطها التحليل الأولي)
+              </Label>
+              <EditableStringList
+                items={draft.mandateTasks}
+                onChange={(next) => setDraft((p) => ({ ...p, mandateTasks: next }))}
+                placeholder="نص المهمة"
+                ordered
+              />
+            </>
+          ) : (
+            <>
+              <p className="text-justify leading-7 whitespace-pre-wrap">{parsed.mandateText}</p>
+              {parsed.mandateTasks.length > 0 && (
+                <ol className="flex flex-col gap-1 ps-5">
+                  {parsed.mandateTasks.map((task, i) => (
+                    <li key={i} className="list-decimal">
+                      {task}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -135,13 +328,50 @@ export function CaseAnalysisReview({
                         {DOC_CATEGORY_LABELS[rd.docCategory as DocCategory] ?? rd.docCategory}
                       </TableCell>
                       <TableCell>
-                        {rd.submittedByPartyId
-                          ? (partyById.get(rd.submittedByPartyId)?.name ?? "—")
-                          : "غير محدد"}
+                        {editing ? (
+                          <Select
+                            value={rd.submittedByPartyId ?? "none"}
+                            onValueChange={(v) => updateReceivedDoc(i, { submittedByPartyId: v === "none" ? null : v })}
+                          >
+                            <SelectTrigger className="h-8 w-40">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">غير محدد</SelectItem>
+                              {parties.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  {p.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : rd.submittedByPartyId ? (
+                          (partyById.get(rd.submittedByPartyId)?.name ?? "—")
+                        ) : (
+                          "غير محدد"
+                        )}
                       </TableCell>
-                      <TableCell>{rd.periodLabel ?? "—"}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">{rd.status}</Badge>
+                        {editing ? (
+                          <Input
+                            className="h-8 w-32"
+                            value={rd.periodLabel ?? ""}
+                            onChange={(e) => updateReceivedDoc(i, { periodLabel: e.target.value || null })}
+                          />
+                        ) : (
+                          (rd.periodLabel ?? "—")
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {editing ? (
+                          <Input
+                            className="h-8 w-28"
+                            value={rd.status}
+                            onChange={(e) => updateReceivedDoc(i, { status: e.target.value })}
+                          />
+                        ) : (
+                          <Badge variant="outline">{rd.status}</Badge>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -157,7 +387,66 @@ export function CaseAnalysisReview({
           <CardTitle>المستندات الناقصة المطلوب طلبها ({parsed.missingDocuments.length})</CardTitle>
         </CardHeader>
         <CardContent>
-          {parsed.missingDocuments.length === 0 ? (
+          {editing ? (
+            <div className="flex flex-col gap-3">
+              {draft.missingDocuments.map((m, i) => (
+                <div key={i} className="flex flex-col gap-2 rounded-md border p-3">
+                  <div className="flex items-start gap-2">
+                    <Input
+                      value={m.item}
+                      onChange={(e) => updateMissingDoc(i, { item: e.target.value })}
+                      placeholder="المستند المطلوب"
+                      className="flex-1"
+                    />
+                    <Button type="button" variant="ghost" size="icon" onClick={() => removeMissingDoc(i)}>
+                      <Trash2 className="size-4 text-destructive" />
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {parties.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => toggleMissingDocParty(i, p.id)}
+                        className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                          m.requestedFromPartyIds.includes(p.id)
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-muted-foreground/25 text-muted-foreground"
+                        }`}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                  <Input
+                    value={m.reason}
+                    onChange={(e) => updateMissingDoc(i, { reason: e.target.value })}
+                    placeholder="سبب طلبه"
+                  />
+                  <Input
+                    value={m.relatedTask ?? ""}
+                    onChange={(e) => updateMissingDoc(i, { relatedTask: e.target.value || null })}
+                    placeholder="المهمة المرتبطة (اختياري)"
+                  />
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                onClick={() =>
+                  setDraft((p) => ({
+                    ...p,
+                    missingDocuments: [...p.missingDocuments, { item: "", requestedFromPartyIds: [], reason: "", relatedTask: null }],
+                  }))
+                }
+              >
+                <Plus className="size-4" />
+                إضافة بند
+              </Button>
+            </div>
+          ) : parsed.missingDocuments.length === 0 ? (
             <p className="text-sm text-muted-foreground">لا يوجد</p>
           ) : (
             <div className="overflow-x-auto rounded-md border">
@@ -205,7 +494,12 @@ export function CaseAnalysisReview({
           <CardTitle>نقاط تحتاج إلى إيضاح من الأطراف</CardTitle>
         </CardHeader>
         <CardContent>
-          {parsed.unclearPoints.length === 0 ? (
+          {editing ? (
+            <EditableStringList
+              items={draft.unclearPoints}
+              onChange={(next) => setDraft((p) => ({ ...p, unclearPoints: next }))}
+            />
+          ) : parsed.unclearPoints.length === 0 ? (
             <p className="text-sm text-muted-foreground">لا يوجد</p>
           ) : (
             <ul className="flex flex-col gap-1 ps-5">
@@ -225,8 +519,16 @@ export function CaseAnalysisReview({
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div>
-            <p className="mb-2 text-sm font-medium">أسئلة للمدعي / المستأنف</p>
-            {parsed.claimantQuestions.length === 0 ? (
+            <p className="mb-2 text-sm font-medium">
+              أسئلة لـ{CASE_PARTY_ROLE_LABELS.CLAIMANT}
+            </p>
+            {editing ? (
+              <EditableStringList
+                items={draft.claimantQuestions}
+                onChange={(next) => setDraft((p) => ({ ...p, claimantQuestions: next }))}
+                ordered
+              />
+            ) : parsed.claimantQuestions.length === 0 ? (
               <p className="text-sm text-muted-foreground">لا يوجد</p>
             ) : (
               <ol className="flex flex-col gap-1 ps-5">
@@ -239,8 +541,16 @@ export function CaseAnalysisReview({
             )}
           </div>
           <div>
-            <p className="mb-2 text-sm font-medium">أسئلة للمدعى عليه / المستأنف ضده</p>
-            {parsed.respondentQuestions.length === 0 ? (
+            <p className="mb-2 text-sm font-medium">
+              أسئلة لـ{CASE_PARTY_ROLE_LABELS.RESPONDENT}
+            </p>
+            {editing ? (
+              <EditableStringList
+                items={draft.respondentQuestions}
+                onChange={(next) => setDraft((p) => ({ ...p, respondentQuestions: next }))}
+                ordered
+              />
+            ) : parsed.respondentQuestions.length === 0 ? (
               <p className="text-sm text-muted-foreground">لا يوجد</p>
             ) : (
               <ol className="flex flex-col gap-1 ps-5">
@@ -260,7 +570,12 @@ export function CaseAnalysisReview({
           <CardTitle>ملاحظات أولية للخبير</CardTitle>
         </CardHeader>
         <CardContent>
-          {parsed.expertNotes.length === 0 ? (
+          {editing ? (
+            <EditableStringList
+              items={draft.expertNotes}
+              onChange={(next) => setDraft((p) => ({ ...p, expertNotes: next }))}
+            />
+          ) : parsed.expertNotes.length === 0 ? (
             <p className="text-sm text-muted-foreground">لا يوجد</p>
           ) : (
             <ul className="flex flex-col gap-1 ps-5">
@@ -283,25 +598,39 @@ export function CaseAnalysisReview({
         </Button>
 
         <div className="flex flex-wrap gap-2">
-          {parsed.missingDocuments.length > 0 && (
-            <Button variant="outline" asChild>
-              <Link href={`/cases/${caseId}/notices/new?fromAnalysisId=${analysis.id}`}>
-                <Mail className="size-4" />
-                توليد إشعار النواقص ودعوة الاجتماع الأول
-              </Link>
-            </Button>
-          )}
-
-          {analysis.status === "APPROVED" ? (
-            <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700">
-              <CheckCircle2 className="size-3.5" />
-              تم الاعتماد
-            </Badge>
+          {editing ? (
+            <>
+              <Button type="button" variant="ghost" onClick={cancelEditing} disabled={saving}>
+                إلغاء
+              </Button>
+              <Button type="button" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                حفظ التعديلات
+              </Button>
+            </>
           ) : (
-            <Button onClick={handleApprove} disabled={approving} size="lg">
-              {approving ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              مراجعة واعتماد التحليل الأولي
-            </Button>
+            <>
+              {parsed.missingDocuments.length > 0 && (
+                <Button variant="outline" asChild>
+                  <Link href={`/cases/${caseId}/notices/new?fromAnalysisId=${analysis.id}`}>
+                    <Mail className="size-4" />
+                    توليد إشعار النواقص ودعوة الاجتماع الأول
+                  </Link>
+                </Button>
+              )}
+
+              {analysis.status === "APPROVED" ? (
+                <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700">
+                  <CheckCircle2 className="size-3.5" />
+                  تم الاعتماد
+                </Badge>
+              ) : (
+                <Button onClick={handleApprove} disabled={approving} size="lg">
+                  {approving ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                  مراجعة واعتماد التحليل الأولي
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>

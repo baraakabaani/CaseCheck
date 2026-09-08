@@ -49,3 +49,22 @@ export const aiCaseAnalysisResultSchema = caseAnalysisResultSchema
   .omit({ receivedDocuments: true })
   .extend({ receivedDocuments: z.array(aiReceivedDocumentSchema) });
 export type AiCaseAnalysisResult = z.infer<typeof aiCaseAnalysisResultSchema>;
+
+// ---------------------------------------------------------------------------
+// تعديل يدوي من الخبير — كل حقل نتاج الذكاء الاصطناعي قابل للتصحيح إن كان
+// غير دقيق، سواء قبل الاعتماد (مراجعة المرحلة 4) أو بعده (تبويب "التحليل
+// الأولي" في الموديول 1 لدعوى نشطة بالفعل) — mandateTasks تحديداً يُقرأ
+// حياً في كل مرة من lib/reports/report-aggregator.ts، فتعديله بعد الاعتماد
+// ينعكس فعلياً على هيكل تقرير الموديول 4 دون حاجة لأي إجراء إضافي.
+export const updateCaseAnalysisSchema = z.object({
+  caseSummary: z.string().min(1).optional(),
+  mandateText: z.string().min(1).optional(),
+  mandateTasks: z.array(z.string().min(1)).optional(),
+  receivedDocuments: z.array(receivedDocumentSummarySchema).optional(),
+  missingDocuments: z.array(missingDocumentItemSchema).optional(),
+  unclearPoints: z.array(z.string().min(1)).optional(),
+  claimantQuestions: z.array(z.string().min(1)).optional(),
+  respondentQuestions: z.array(z.string().min(1)).optional(),
+  expertNotes: z.array(z.string().min(1)).optional(),
+});
+export type UpdateCaseAnalysisInput = z.infer<typeof updateCaseAnalysisSchema>;

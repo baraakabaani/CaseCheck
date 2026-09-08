@@ -40,7 +40,21 @@ async function finalizeArabicDocx(blob: Blob): Promise<Blob> {
   const docXml = await zip.file(docXmlPath)?.async("string");
   if (!docXml) return blob; // بنية غير متوقعة — لا تُفشِل التصدير، أعد الأصل كما هو
 
-  const patched = docXml.replace(/<w:sectPr(\s[^>]*)?>/g, (match) => `${match}<w:bidi/>`);
+  // ترتيب عناصر w:sectPr مُلزَم بمخطط OOXML (CT_SectPr) وليس حراً: w:bidi
+  // يجب أن يسبق w:docGrid مباشرة (يأتي بعد w:textDirection ويسبق w:rtlGutter
+  // وw:docGrid) — لا أن يكون أول عنصر في sectPr كما كانت النسخة الأولى من
+  // هذا الإصلاح تفعل خطأً. عنصر بترتيب مخالف للمخطط قد يدفع Word لتجاهله
+  // أو "إصلاح" الملف بصمت عند الفتح، بما قد يمتد أثره لتنسيقات أخرى غير
+  // متعلقة به إطلاقاً — وهذا ما كان يحدث فعلياً. docx.js يُذيّل sectPr
+  // دوماً بـ w:docGrid (انظر مصدر SectionProperties)، فالإدراج قبله مباشرة
+  // نقطة صحيحة وموثوقة؛ نُبقي على إدراج قبل </w:sectPr> كحل احتياطي فقط
+  // إن غاب w:docGrid لأي سبب.
+  const patched = docXml.replace(/<w:sectPr(\s[^>]*)?>[\s\S]*?<\/w:sectPr>/g, (sectPr) => {
+    if (sectPr.includes("<w:docGrid")) {
+      return sectPr.replace(/<w:docGrid/, "<w:bidi/><w:docGrid");
+    }
+    return sectPr.replace(/<\/w:sectPr>/, "<w:bidi/></w:sectPr>");
+  });
   zip.file(docXmlPath, patched);
 
   return zip.generateAsync({
@@ -99,7 +113,7 @@ export async function buildEmailDocxBlob({ subject, bodyAr }: EmailDocxInput): P
     (line) =>
       new Paragraph({
         bidirectional: true,
-        alignment: AlignmentType.RIGHT,
+        alignment: AlignmentType.START,
         spacing: { after: 160 },
         children: [new TextRun({ text: line, rightToLeft: true, language: AR_LANG, font: "Arial" })],
       }),
@@ -112,7 +126,7 @@ export async function buildEmailDocxBlob({ subject, bodyAr }: EmailDocxInput): P
           ...(await buildBrandedDocxHeader()),
           new Paragraph({
             bidirectional: true,
-            alignment: AlignmentType.RIGHT,
+            alignment: AlignmentType.START,
             spacing: { after: 300 },
             children: [
               new TextRun({
@@ -165,7 +179,7 @@ function reportParagraph(
 ): Paragraph {
   return new Paragraph({
     bidirectional: true,
-    alignment: opts.center ? AlignmentType.CENTER : AlignmentType.RIGHT,
+    alignment: opts.center ? AlignmentType.CENTER : AlignmentType.START,
     heading: opts.heading,
     pageBreakBefore: opts.pageBreakBefore,
     spacing: { before: opts.spacingBefore ?? 0, after: opts.spacingAfter ?? 140 },
@@ -574,7 +588,7 @@ async function buildBrandedTextReportDocxBlob({
     (line) =>
       new Paragraph({
         bidirectional: true,
-        alignment: AlignmentType.RIGHT,
+        alignment: AlignmentType.START,
         spacing: { after: 140 },
         children: [new TextRun({ text: line || " ", rightToLeft: true, language: AR_LANG, font: "Arial" })],
       }),
@@ -587,7 +601,7 @@ async function buildBrandedTextReportDocxBlob({
           ...(await buildBrandedDocxHeader()),
           new Paragraph({
             bidirectional: true,
-            alignment: AlignmentType.RIGHT,
+            alignment: AlignmentType.START,
             spacing: { after: 300 },
             children: [new TextRun({ text: title, bold: true, size: 28, rightToLeft: true, language: AR_LANG, font: "Arial" })],
           }),
@@ -596,7 +610,7 @@ async function buildBrandedTextReportDocxBlob({
             ? [
                 new Paragraph({
                   bidirectional: true,
-                  alignment: AlignmentType.RIGHT,
+                  alignment: AlignmentType.START,
                   spacing: { before: 500 },
                   children: [
                     new TextRun({ text: signatureLabel, bold: true, rightToLeft: true, language: AR_LANG, font: "Arial" }),

@@ -8,19 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Sparkles, Loader2, Zap, ArrowRight } from "lucide-react";
 import { DocumentSlotUploader } from "@/components/DocumentSlotUploader";
+import { BulkDocumentUpload } from "@/components/BulkDocumentUpload";
 import { buildClientApiKeyHeaders } from "@/lib/client-api-key";
+import { DOCUMENT_UPLOAD_SLOTS as SLOTS } from "@/lib/document-slots";
 import type { DocumentDetail } from "@/lib/queries";
 import type { DocCategory } from "@/lib/schemas";
-
-// الخانات الخمس الثابتة (المرحلة 3) — التصنيف يُحدَّد عند الرفع نفسه، لا
-// يُترك للذكاء الاصطناعي لاحقاً (كان ذلك سبباً رئيسياً في تضخم حجم الطلب).
-const SLOTS: { category: DocCategory; title: string; multiple: boolean }[] = [
-  { category: "PRELIMINARY_RULING", title: "الحكم التمهيدي / قرار الندب", multiple: false },
-  { category: "STATEMENT_OF_CLAIM", title: "لائحة / صحيفة الدعوى", multiple: false },
-  { category: "PARTY_MEMO", title: "مذكرات الأطراف", multiple: true },
-  { category: "PARTY_ATTACHMENT", title: "مستندات الأطراف وحوافظ المستندات", multiple: true },
-  { category: "OTHER_JUDICIAL", title: "مستندات قضائية أخرى", multiple: true },
-];
 
 export function CaseDocumentsStep({
   caseId,
@@ -73,6 +65,8 @@ export function CaseDocumentsStep({
 
   return (
     <div className="flex flex-col gap-6">
+      <BulkDocumentUpload caseId={caseId} existingCounts={byCategory} onChanged={refresh} />
+
       <Card>
         <CardContent className="grid gap-5 sm:grid-cols-2">
           {SLOTS.map((slot) => (

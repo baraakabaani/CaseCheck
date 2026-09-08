@@ -17,17 +17,23 @@ import {
 import JSZip from "jszip";
 import { arabicOrdinal } from "./arabic-ordinals";
 
-/** يُصلح ثغرة حقيقية في حزمة docx: كل فقرة/جدول في هذا الملف يحمل بالفعل
- * علم الاتجاه الصحيح (w:bidi على الفقرة، w:rtl على كل نص، w:bidiVisual على
- * الجدول) — لكن الحزمة لا تدعم إطلاقاً ضبط اتجاه *القسم* نفسه (w:sectPr لا
- * يقبل w:bidi عبر أي خيار عام). بلا هذا العلم، فتح المستند في Word يعرض
- * المحتوى القائم بمحاذاة يمين صحيحة، لكن أي فقرة جديدة يكتبها المستخدم بعد
- * ذلك (أو اتجاه الصفحة العام) يعود افتراضياً لليسار، وهذا بالضبط ما يجعل
- * الملف "لا يبدو عربياً بالكامل" رغم صحة كل فقرة موجودة فيه. الحل: فك ضغط
- * الملف الناتج فعلياً (docx هو أرشيف zip)، حقن <w:bidi/> داخل كل <w:sectPr>
- * في document.xml مباشرة (لا خيار مكافئ في واجهة الحزمة البرمجية)، ثم
- * إعادة الضغط — يُطبَّق هذا على كل تصدير Word في هذا الملف، لا الموديول 4
- * وحده، لأن الخلل نفسه موجود في كل مستند RTL يُنتجه docx.js بهذه الطريقة. */
+/** لغة كل نص عربي في هذا الملف — w:lang/w:bidi على مستوى كل نص (run)، لا
+ * فقط w:rtl/w:bidi المنطقيّين. اتضح أن Word لا يُطبِّق فعلياً محاذاة اليمين
+ * والتفاف الفقرة بشكل RTL سليم على نص لم يُوسَم بلغة عربية صريحة، حتى لو
+ * حملت الفقرة w:bidi والنص w:rtl — تلك الأعلام وحدها غير كافية عملياً (راجع
+ * تعليق finalizeArabicDocx أدناه لبقية القصة). */
+const AR_LANG = { value: "ar-AE", bidirectional: "ar-AE" };
+
+/** يُصلح ثغرة حقيقية في حزمة docx: w:sectPr (اتجاه *القسم* نفسه) لا يقبل
+ * w:bidi عبر أي خيار عام في واجهة الحزمة البرمجية على الإطلاق (تحقَّق من
+ * الكود المصدَّر نفسه). بلا هذا العلم، أي فقرة جديدة يكتبها المستخدم بعد
+ * فتح الملف تعود افتراضياً لليسار حتى لو كانت كل فقرة موجودة مسبقاً مضبوطة
+ * بشكل صحيح. الحل: فك ضغط الملف الناتج فعلياً (docx هو أرشيف zip)، حقن
+ * <w:bidi/> داخل كل <w:sectPr> في document.xml مباشرة، ثم إعادة الضغط —
+ * يُطبَّق هذا على كل تصدير Word في هذا الملف، لا الموديول 4 وحده، لأن الخلل
+ * نفسه موجود في كل مستند RTL يُنتجه docx.js بهذه الطريقة. ملاحظة: هذا وحده
+ * لا يكفي لسلامة محاذاة الفقرات الموجودة فعلاً — ذلك يتطلب AR_LANG أعلاه
+ * على مستوى كل نص، وهو إصلاح منفصل. */
 async function finalizeArabicDocx(blob: Blob): Promise<Blob> {
   const zip = await JSZip.loadAsync(blob);
   const docXmlPath = "word/document.xml";
@@ -95,7 +101,7 @@ export async function buildEmailDocxBlob({ subject, bodyAr }: EmailDocxInput): P
         bidirectional: true,
         alignment: AlignmentType.RIGHT,
         spacing: { after: 160 },
-        children: [new TextRun({ text: line, rightToLeft: true, font: "Arial" })],
+        children: [new TextRun({ text: line, rightToLeft: true, language: AR_LANG, font: "Arial" })],
       }),
   );
 
@@ -114,6 +120,7 @@ export async function buildEmailDocxBlob({ subject, bodyAr }: EmailDocxInput): P
                 bold: true,
                 size: 28,
                 rightToLeft: true,
+                language: AR_LANG,
                 font: "Arial",
               }),
             ],
@@ -163,7 +170,7 @@ function reportParagraph(
     pageBreakBefore: opts.pageBreakBefore,
     spacing: { before: opts.spacingBefore ?? 0, after: opts.spacingAfter ?? 140 },
     children: [
-      new TextRun({ text: text || " ", bold: opts.bold, size: opts.size, rightToLeft: true, font: REPORT_FONT }),
+      new TextRun({ text: text || " ", bold: opts.bold, size: opts.size, rightToLeft: true, language: AR_LANG, font: REPORT_FONT }),
     ],
   });
 }
@@ -212,7 +219,7 @@ function reportTableCellParagraph(text: string, opts: { bold?: boolean } = {}): 
   return new Paragraph({
     bidirectional: true,
     alignment: AlignmentType.CENTER,
-    children: [new TextRun({ text: text || "—", bold: opts.bold, rightToLeft: true, font: REPORT_FONT, size: 20 })],
+    children: [new TextRun({ text: text || "—", bold: opts.bold, rightToLeft: true, language: AR_LANG, font: REPORT_FONT, size: 20 })],
   });
 }
 
@@ -512,15 +519,15 @@ export async function buildCourtReportDocxBlob({
     styles: {
       default: {
         heading1: {
-          run: { font: REPORT_FONT, bold: true, color: "000000", size: 30 },
+          run: { font: REPORT_FONT, bold: true, color: "000000", size: 30, language: AR_LANG },
           paragraph: { spacing: { before: 420, after: 200 } },
         },
         heading2: {
-          run: { font: REPORT_FONT, bold: true, color: "000000", size: 24 },
+          run: { font: REPORT_FONT, bold: true, color: "000000", size: 24, language: AR_LANG },
           paragraph: { spacing: { before: 320, after: 140 } },
         },
         document: {
-          run: { font: REPORT_FONT, size: 22 },
+          run: { font: REPORT_FONT, size: 22, language: AR_LANG },
         },
       },
     },
@@ -569,7 +576,7 @@ async function buildBrandedTextReportDocxBlob({
         bidirectional: true,
         alignment: AlignmentType.RIGHT,
         spacing: { after: 140 },
-        children: [new TextRun({ text: line || " ", rightToLeft: true, font: "Arial" })],
+        children: [new TextRun({ text: line || " ", rightToLeft: true, language: AR_LANG, font: "Arial" })],
       }),
   );
 
@@ -582,7 +589,7 @@ async function buildBrandedTextReportDocxBlob({
             bidirectional: true,
             alignment: AlignmentType.RIGHT,
             spacing: { after: 300 },
-            children: [new TextRun({ text: title, bold: true, size: 28, rightToLeft: true, font: "Arial" })],
+            children: [new TextRun({ text: title, bold: true, size: 28, rightToLeft: true, language: AR_LANG, font: "Arial" })],
           }),
           ...bodyParagraphs,
           ...(signatureLabel
@@ -592,7 +599,7 @@ async function buildBrandedTextReportDocxBlob({
                   alignment: AlignmentType.RIGHT,
                   spacing: { before: 500 },
                   children: [
-                    new TextRun({ text: signatureLabel, bold: true, rightToLeft: true, font: "Arial" }),
+                    new TextRun({ text: signatureLabel, bold: true, rightToLeft: true, language: AR_LANG, font: "Arial" }),
                   ],
                 }),
               ]

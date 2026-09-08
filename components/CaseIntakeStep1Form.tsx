@@ -20,8 +20,17 @@ import { Loader2, Plus, Trash2, ArrowRight } from "lucide-react";
 import { LITIGATION_DEGREES, CASE_CATEGORIES, type LitigationDegree, type CaseCategory } from "@/lib/schemas";
 import { LITIGATION_DEGREE_LABELS, CASE_CATEGORY_LABELS } from "@/lib/case-intake-labels";
 import { loadFormDraft, saveFormDraft, clearFormDraft } from "@/lib/form-draft";
+import { CaseBasicsAutoFillUpload } from "@/components/CaseBasicsAutoFillUpload";
+import { cn } from "@/lib/utils";
+import type { ExtractedCaseBasics } from "@/lib/case-basics-schemas";
 
 const DRAFT_KEY = "case-intake-step1-draft";
+
+/** حدود الحقول المقترَحة تلقائياً (خانة "تعبئة تلقائية من مستند" أعلى
+ * النموذج) — تختفي بمجرد أن يضغط المستخدم داخل الحقل (مراجعة ضمنية)، لا
+ * فقط عند تعديل قيمته، حتى لا يُطالَب بتعديل حقل صحيح أصلاً ليُعتبر
+ * "مراجَعاً". */
+const AUTO_FILLED_CLASS = "border-purple-400 ring-1 ring-purple-300/60 dark:border-purple-600";
 
 export interface PartyDraft {
   name: string;
@@ -70,11 +79,18 @@ function PartyListEditor({
   placeholder,
   parties,
   onChange,
+  isAutoFilled,
+  onFieldReviewed,
 }: {
   label: string;
   placeholder: string;
   parties: PartyDraft[];
   onChange: (next: PartyDraft[]) => void;
+  /** هل هذا الحقل (بفهرس الطرف واسم الحقل) لا يزال مُقترَحاً تلقائياً ولم
+   * يراجعه المستخدم بعد؟ اختياري — النماذج التي لا تدعم التعبئة التلقائية
+   * (لا يوجد لها حالياً غير هذا النموذج) تتجاهله. */
+  isAutoFilled?: (index: number, field: "name" | "capacityNote") => boolean;
+  onFieldReviewed?: (index: number, field: "name" | "capacityNote") => void;
 }) {
   function update(i: number, patch: Partial<PartyDraft>) {
     onChange(parties.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
@@ -90,12 +106,16 @@ function PartyListEditor({
           <Input
             value={party.name}
             onChange={(e) => update(i, { name: e.target.value })}
+            onFocus={() => onFieldReviewed?.(i, "name")}
             placeholder={placeholder}
+            className={cn(isAutoFilled?.(i, "name") && AUTO_FILLED_CLASS)}
           />
           <Input
             value={party.capacityNote}
             onChange={(e) => update(i, { capacityNote: e.target.value })}
+            onFocus={() => onFieldReviewed?.(i, "capacityNote")}
             placeholder="الصفة (اختياري) — مثال: شريك بنسبة 68% ومدير الشركة"
+            className={cn(isAutoFilled?.(i, "capacityNote") && AUTO_FILLED_CLASS)}
           />
           {parties.length > 1 && (
             <Button type="button" variant="ghost" size="icon" onClick={() => remove(i)}>
@@ -152,6 +172,71 @@ export function CaseIntakeStep1Form({
   const [notes, setNotes] = useState(initialData?.notes ?? "");
   const [clientName, setClientName] = useState(initialData?.clientName ?? "");
   const [clientEmail, setClientEmail] = useState(initialData?.clientEmail ?? "");
+
+  // خانة "تعبئة تلقائية من مستند" أعلى النموذج — حقول تحمل قيماً مقترَحة لم
+  // يراجعها المستخدم بعد (حدود بنفسجية، تختفي بمجرد الضغط داخل الحقل)،
+  // والملف الأصلي نفسه (يُرفَع فعلياً كخانة "الحكم التمهيدي" في المرحلة 3
+  // بعد إنشاء الدعوى بنجاح — لا حاجة لرفعه مرتين). غير مُفعَّلة في وضع
+  // التعديل (isEditing): بيانات دعوى موجودة فعلاً لا تُعرَض عليها تعبئة
+  // تلقائية من مستند جديد.
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<string>>(new Set());
+  const [rulingFile, setRulingFile] = useState<File | null>(null);
+
+  function reviewField(key: string) {
+    setAutoFilledFields((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }
+  function isAuto(key: string) {
+    return autoFilledFields.has(key);
+  }
+
+  function handleExtracted(result: ExtractedCaseBasics, file: File) {
+    setRulingFile(file);
+    const next = new Set<string>();
+    if (result.caseNumber) {
+      setCaseNumber(result.caseNumber);
+      next.add("caseNumber");
+    }
+    if (result.court) {
+      setCourt(result.court);
+      next.add("court");
+    }
+    if (result.circuit) {
+      setCircuit(result.circuit);
+      next.add("circuit");
+    }
+    if (result.litigationDegree) {
+      setLitigationDegree(result.litigationDegree);
+      next.add("litigationDegree");
+    }
+    if (result.caseCategory) {
+      setCaseCategory(result.caseCategory);
+      next.add("caseCategory");
+    }
+    if (result.title) {
+      setTitle(result.title);
+      next.add("title");
+    }
+    if (result.claimants.length > 0) {
+      setClaimants(result.claimants.map((p) => ({ name: p.name, capacityNote: p.capacityNote ?? "" })));
+      result.claimants.forEach((p, i) => {
+        next.add(`claimant-name-${i}`);
+        if (p.capacityNote) next.add(`claimant-capacityNote-${i}`);
+      });
+    }
+    if (result.respondents.length > 0) {
+      setRespondents(result.respondents.map((p) => ({ name: p.name, capacityNote: p.capacityNote ?? "" })));
+      result.respondents.forEach((p, i) => {
+        next.add(`respondent-name-${i}`);
+        if (p.capacityNote) next.add(`respondent-capacityNote-${i}`);
+      });
+    }
+    setAutoFilledFields(next);
+  }
 
   // استعادة المسودة المحفوظة محلياً (إن وُجدت) بعد التحميل الأول فقط، لتفادي
   // أي تعارض بين عرض الخادم وعرض المتصفح الأول. مضبوطة بمرجع (ref) فلا تُنفَّذ
@@ -253,7 +338,35 @@ export function CaseIntakeStep1Form({
       if (!res.ok) throw new Error(data.error || "فشل حفظ بيانات القضية");
 
       if (!isEditing) clearFormDraft(DRAFT_KEY);
-      toast.success("تم حفظ بيانات القضية الأساسية");
+
+      // الملف المرفوع للتعبئة التلقائية (إن وُجد) يُرفَع الآن فعلياً كخانة
+      // "الحكم التمهيدي / قرار الندب" — بعد إنشاء الدعوى مباشرة، فلا يحتاج
+      // الخبير لرفعه مرة أخرى يدوياً في المرحلة 3. فشل هذه الخطوة لا يوقف
+      // المتابعة إلى المرحلة التالية — الدعوى نفسها أُنشئت بنجاح فعلاً،
+      // ويبقى بإمكان الخبير رفع الملف يدوياً لاحقاً.
+      if (!isEditing && rulingFile) {
+        try {
+          const docForm = new FormData();
+          docForm.append("files", rulingFile);
+          docForm.append("docCategory", "PRELIMINARY_RULING");
+          const docRes = await fetch(`/api/cases/${data.case.id}/documents`, {
+            method: "POST",
+            body: docForm,
+          });
+          if (docRes.ok) {
+            toast.success("تم حفظ بيانات القضية، وأُضيف ملف الحكم التمهيدي تلقائياً");
+          } else {
+            toast.success("تم حفظ بيانات القضية الأساسية");
+            toast.warning("تعذّر إضافة ملف الحكم التمهيدي تلقائياً — ارفعه يدوياً في مرحلة المستندات");
+          }
+        } catch {
+          toast.success("تم حفظ بيانات القضية الأساسية");
+          toast.warning("تعذّر إضافة ملف الحكم التمهيدي تلقائياً — ارفعه يدوياً في مرحلة المستندات");
+        }
+      } else {
+        toast.success("تم حفظ بيانات القضية الأساسية");
+      }
+
       router.push(`/cases/${isEditing ? caseId : data.case.id}/setup/mandate`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "حدث خطأ غير متوقع");
@@ -264,6 +377,8 @@ export function CaseIntakeStep1Form({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      {!isEditing && <CaseBasicsAutoFillUpload onExtracted={handleExtracted} />}
+
       <Card>
         <CardHeader>
           <CardTitle>بيانات القضية الأساسية</CardTitle>
@@ -275,8 +390,10 @@ export function CaseIntakeStep1Form({
               id="caseNumber"
               value={caseNumber}
               onChange={(e) => setCaseNumber(e.target.value)}
+              onFocus={() => reviewField("caseNumber")}
               placeholder="مثال: 4360 لسنة 2026 تجاري"
               required
+              className={cn(isAuto("caseNumber") && AUTO_FILLED_CLASS)}
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -285,8 +402,10 @@ export function CaseIntakeStep1Form({
               id="court"
               value={court}
               onChange={(e) => setCourt(e.target.value)}
+              onFocus={() => reviewField("court")}
               placeholder="مثال: محكمة الشارقة الابتدائية"
               required
+              className={cn(isAuto("court") && AUTO_FILLED_CLASS)}
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -295,16 +414,24 @@ export function CaseIntakeStep1Form({
               id="circuit"
               value={circuit}
               onChange={(e) => setCircuit(e.target.value)}
+              onFocus={() => reviewField("circuit")}
               placeholder="مثال: الدائرة التجارية الرابعة"
+              className={cn(isAuto("circuit") && AUTO_FILLED_CLASS)}
             />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>درجة التقاضي *</Label>
             <Select
               value={litigationDegree}
-              onValueChange={(v) => setLitigationDegree(v as LitigationDegree)}
+              onValueChange={(v) => {
+                setLitigationDegree(v as LitigationDegree);
+                reviewField("litigationDegree");
+              }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger
+                className={cn("w-full", isAuto("litigationDegree") && AUTO_FILLED_CLASS)}
+                onFocus={() => reviewField("litigationDegree")}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -320,9 +447,15 @@ export function CaseIntakeStep1Form({
             <Label>نوع الدعوى *</Label>
             <Select
               value={caseCategory}
-              onValueChange={(v) => setCaseCategory(v as CaseCategory)}
+              onValueChange={(v) => {
+                setCaseCategory(v as CaseCategory);
+                reviewField("caseCategory");
+              }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger
+                className={cn("w-full", isAuto("caseCategory") && AUTO_FILLED_CLASS)}
+                onFocus={() => reviewField("caseCategory")}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -340,7 +473,9 @@ export function CaseIntakeStep1Form({
               id="title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              onFocus={() => reviewField("title")}
               placeholder="مثال: مطالبة مالية ناشئة عن عقد توريد"
+              className={cn(isAuto("title") && AUTO_FILLED_CLASS)}
             />
           </div>
 
@@ -349,12 +484,16 @@ export function CaseIntakeStep1Form({
             placeholder="اسم المدعي"
             parties={claimants}
             onChange={setClaimants}
+            isAutoFilled={(i, field) => isAuto(`claimant-${field}-${i}`)}
+            onFieldReviewed={(i, field) => reviewField(`claimant-${field}-${i}`)}
           />
           <PartyListEditor
             label="اسم المدعى عليه / المستأنف ضده"
             placeholder="اسم المدعى عليه"
             parties={respondents}
             onChange={setRespondents}
+            isAutoFilled={(i, field) => isAuto(`respondent-${field}-${i}`)}
+            onFieldReviewed={(i, field) => reviewField(`respondent-${field}-${i}`)}
           />
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">

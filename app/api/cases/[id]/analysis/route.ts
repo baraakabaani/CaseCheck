@@ -48,6 +48,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
           : null,
         title: caseRecord.title,
         mandateNature: safeParseJson<MandateNatureOption[]>(caseRecord.mandateNature, []),
+        mandateNatureOther: safeParseJson<string[]>(caseRecord.mandateNatureOther, []),
       },
       caseRecord.parties.map((p) => ({
         id: p.id,

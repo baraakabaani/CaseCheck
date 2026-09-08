@@ -16,8 +16,8 @@
 import { prisma } from "../db";
 import { buildSingleDocumentDigest, type SmartIngestDocument } from "../smart-ingest";
 import { tokenize, tokenSet, tokenCoverage } from "../text-normalize";
-import { CASE_PARTY_ROLE_LABELS, DOC_CATEGORY_LABELS } from "../case-intake-labels";
-import type { DocCategory } from "../schemas";
+import { CASE_PARTY_ROLE_LABELS, DOC_CATEGORY_LABELS, MANDATE_NATURE_LABELS } from "../case-intake-labels";
+import type { DocCategory, MandateNatureOption } from "../schemas";
 
 function safeParseJson<T>(json: string | null | undefined, fallback: T): T {
   if (!json) return fallback;
@@ -755,7 +755,16 @@ export async function buildReportAggregate(caseId: string): Promise<ReportAggreg
       litigationDegree: src.litigationDegree,
       caseCategory: src.caseCategory,
       clientName: src.clientName,
-      mandateNatureLabels: safeParseJson<string[]>(src.mandateNature, []),
+      // src.mandateNature يخزّن رموز enum (EXAMINE_AUDIT_ACCOUNTS...) لا
+      // نصوصاً عربية جاهزة — كانت تُدرَج هنا خاماً بالخطأ فتظهر أكواد
+      // إنجليزية داخل تقرير عربي؛ يجب تمريرها عبر MANDATE_NATURE_LABELS.
+      // بنود "أخرى" الحرة (mandateNatureOther) نصوص عربية جاهزة أصلاً.
+      mandateNatureLabels: [
+        ...safeParseJson<MandateNatureOption[]>(src.mandateNature, []).map(
+          (n) => MANDATE_NATURE_LABELS[n] ?? n,
+        ),
+        ...safeParseJson<string[]>(src.mandateNatureOther, []),
+      ],
       appointmentCapacity: src.appointmentCapacity,
       committeeMembers: safeParseJson(src.committeeMembers, []),
     },

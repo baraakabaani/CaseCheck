@@ -10,6 +10,7 @@ import {
 } from "./ai-client";
 import { offlineMatchDocumentsToRequirements } from "./offline-matcher";
 import { buildSingleDocumentDigest } from "./smart-ingest";
+import { extractJson } from "./ai-json";
 import type { MatchDocumentInput, MatchRequirementInput } from "./matching-types";
 
 export type { MatchDocumentInput, MatchRequirementInput };
@@ -135,20 +136,6 @@ function buildRequirementsBlock(requirements: MatchRequirementInput[]): string {
 /** Best-effort extraction of a JSON object from a model response — Groq's
  * json_object mode guarantees valid JSON, but this guards against a model
  * that still wraps it in prose or a markdown fence. */
-function extractJson(raw: string): unknown {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("لم يتم العثور على JSON صالح في رد النموذج");
-    }
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
-}
-
 async function callAiForMatching(
   resolved: ResolvedAiKey,
   requirements: MatchRequirementInput[],

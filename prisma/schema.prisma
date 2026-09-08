@@ -36,6 +36,7 @@ model Case {
   appointmentCapacity String? // SOLE_EXPERT | COMMITTEE_CHAIR | COMMITTEE_MEMBER
   committeeMembers    String? // JSON: [{ name, specialization }] — إن كانت لجنة خبراء
   mandateNature       String? // JSON string[] من طبيعة المأمورية الحسابية (فحص وتدقيق الحسابات...)
+  mandateNatureOther  String? // JSON string[] — بنود "أخرى" حرة كتبها الخبير بنفسه، بعدد غير محدود
   mandateNotes        String? // ملاحظات على المأمورية
 
   // تتبّع تقدّم المعالج (wizard) حتى يمكن استئناف ملف لم يُستكمل فتحه

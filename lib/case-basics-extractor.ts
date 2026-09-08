@@ -13,6 +13,7 @@ import {
 } from "./ai-client";
 import { extractedCaseBasicsSchema, type ExtractedCaseBasics } from "./case-basics-schemas";
 import { LITIGATION_DEGREES, CASE_CATEGORIES } from "./schemas";
+import { extractJson } from "./ai-json";
 
 export interface CaseBasicsExtractionOutcome {
   result: ExtractedCaseBasics;
@@ -47,20 +48,6 @@ const SYSTEM_PROMPT = `أنت مساعد إدخال بيانات في مكتب �
 
 أجب بالعربية الفصحى فيما تكتبه من نصوص. يجب أن يكون ردك بصيغة JSON صالحة فقط، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown، وفق المخطط التالي بالضبط:
 {"caseNumber": "string|null", "court": "string|null", "circuit": "string|null", "litigationDegree": "string|null", "caseCategory": "string|null", "title": "string|null", "claimants": [{"name": "string", "capacityNote": "string|null"}], "respondents": [{"name": "string", "capacityNote": "string|null"}]}`;
-
-function extractJson(raw: string): unknown {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("لم يتم العثور على JSON صالح في رد النموذج");
-    }
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
-}
 
 /** يحدّ من طول النص المُرسَل (قرار الندب/الحكم التمهيدي عادة قصير نسبياً،
  * لكن حماية من ملف استثنائي الطول). */

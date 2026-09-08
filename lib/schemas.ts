@@ -132,6 +132,9 @@ export const caseIntakeStep2Schema = z.object({
   appointmentCapacity: z.enum(APPOINTMENT_CAPACITIES),
   committeeMembers: z.array(committeeMemberSchema).default([]),
   mandateNature: z.array(z.enum(MANDATE_NATURE_OPTIONS)).default([]),
+  // بنود "أخرى" حرة كتبها الخبير بنفسه — منفصلة عن mandateNature الثابتة،
+  // بعدد غير محدود (انظر components/CaseIntakeStep2Form.tsx)
+  mandateNatureOther: z.array(z.string().trim().min(1)).default([]),
   mandateNotes: z.string().optional().nullable(),
 });
 export type CaseIntakeStep2Input = z.infer<typeof caseIntakeStep2Schema>;

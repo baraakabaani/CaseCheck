@@ -36,6 +36,7 @@ import {
 } from "./reports/report-draft-schemas";
 import type { ProposedTable } from "./reports/financial-tables";
 import { FINANCIAL_MATERIAL_KEYWORDS } from "./financial/keywords";
+import { extractJson } from "./ai-json";
 import type { AggregatedTask, ReportAggregate } from "./reports/report-aggregator";
 import type { DocCategory } from "./schemas";
 
@@ -55,20 +56,6 @@ export interface ReportDraftOutcome {
   result: ReportDraftResult;
   mode: "AI" | "OFFLINE";
   warning?: string;
-}
-
-function extractJson(raw: string): unknown {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("لم يتم العثور على JSON صالح في رد النموذج");
-    }
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
 }
 
 function buildCaseHeaderBlock(aggregate: ReportAggregate): string {

@@ -20,6 +20,7 @@ import {
 } from "@/lib/schemas";
 import { APPOINTMENT_CAPACITY_LABELS, MANDATE_NATURE_LABELS } from "@/lib/case-intake-labels";
 import { loadFormDraft, saveFormDraft, clearFormDraft } from "@/lib/form-draft";
+import { EditableStringList } from "@/components/EditableStringList";
 
 interface CommitteeMemberDraft {
   key: string;
@@ -36,6 +37,7 @@ interface Step2Draft {
   appointmentCapacity: AppointmentCapacity;
   committeeMembers: Omit<CommitteeMemberDraft, "key">[];
   mandateNature: MandateNatureOption[];
+  mandateNatureOther: string[];
   mandateNotes: string;
 }
 
@@ -48,18 +50,26 @@ export interface CaseIntakeStep2InitialData {
   appointmentCapacity: AppointmentCapacity;
   committeeMembers: { name: string; specialization: string | null }[];
   mandateNature: MandateNatureOption[];
+  mandateNatureOther: string[];
   mandateNotes: string | null;
 }
 
 export function CaseIntakeStep2Form({
   caseId,
   initialData,
+  redirectTo,
 }: {
   caseId: string;
   /** Set when this phase was already saved once — e.g. reached via a
    * "رجوع" link from Phase 3 — so the form reflects the real saved values
    * instead of starting blank. Skips the localStorage draft mechanism. */
   initialData?: CaseIntakeStep2InitialData;
+  /** Where to navigate after a successful save. Defaults to the next
+   * wizard step (setup/documents) — pass this when the form is reached as
+   * a later free edit on an already-ACTIVE case (see
+   * app/cases/[id]/setup/mandate/page.tsx) so saving returns to the case
+   * hub instead of re-entering the intake wizard. */
+  redirectTo?: string;
 }) {
   const router = useRouter();
   const isEditing = Boolean(initialData);
@@ -92,6 +102,9 @@ export function CaseIntakeStep2Form({
   const [mandateNature, setMandateNature] = useState<Set<MandateNatureOption>>(
     new Set(initialData?.mandateNature ?? []),
   );
+  const [mandateNatureOther, setMandateNatureOther] = useState<string[]>(
+    initialData?.mandateNatureOther ?? [],
+  );
   const [mandateNotes, setMandateNotes] = useState(initialData?.mandateNotes ?? "");
 
   const isCommittee = appointmentCapacity !== "SOLE_EXPERT";
@@ -103,6 +116,12 @@ export function CaseIntakeStep2Form({
       else next.delete(option);
       return next;
     });
+    // "أخرى" هي الخيار الوحيد المصحوب ببنود حرة — إظهار مربع نص واحد فوراً
+    // عند تفعيلها (بدل مربع فارغ يحتاج ضغط "إضافة" أولاً)، وتفريغها كاملة
+    // عند إلغائها حتى لا تُرسَل بيانات مخفية غير مقصودة.
+    if (option === "OTHER") {
+      setMandateNatureOther(checked ? (mandateNatureOther.length > 0 ? mandateNatureOther : [""]) : []);
+    }
   }
 
   const restored = useRef(false);
@@ -124,6 +143,7 @@ export function CaseIntakeStep2Form({
       setCommitteeMembers(draft.committeeMembers.map((m) => ({ ...m, key: crypto.randomUUID() })));
     }
     if (draft.mandateNature?.length) setMandateNature(new Set(draft.mandateNature));
+    if (draft.mandateNatureOther?.length) setMandateNatureOther(draft.mandateNatureOther);
     if (draft.mandateNotes) setMandateNotes(draft.mandateNotes);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [draftKey, isEditing]);
@@ -142,6 +162,7 @@ export function CaseIntakeStep2Form({
         specialization,
       })),
       mandateNature: Array.from(mandateNature),
+      mandateNatureOther,
       mandateNotes,
     });
   }, [
@@ -155,6 +176,7 @@ export function CaseIntakeStep2Form({
     appointmentCapacity,
     committeeMembers,
     mandateNature,
+    mandateNatureOther,
     mandateNotes,
   ]);
 
@@ -189,6 +211,9 @@ export function CaseIntakeStep2Form({
                 .map((m) => ({ name: m.name.trim(), specialization: m.specialization.trim() || null }))
             : [],
           mandateNature: Array.from(mandateNature),
+          mandateNatureOther: mandateNature.has("OTHER")
+            ? mandateNatureOther.map((v) => v.trim()).filter(Boolean)
+            : [],
           mandateNotes: mandateNotes.trim() || null,
           // لا يُرسل عند التعديل (isEditing) — تفادياً لإرجاع دعوى وصلت
           // بالفعل لمرحلة لاحقة (رفع مستندات/تحليل/مكتملة) إلى هذه المرحلة.
@@ -200,7 +225,7 @@ export function CaseIntakeStep2Form({
 
       clearFormDraft(draftKey);
       toast.success("تم حفظ بيانات مأمورية الخبرة");
-      router.push(`/cases/${caseId}/setup/documents`);
+      router.push(redirectTo ?? `/cases/${caseId}/setup/documents`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "حدث خطأ غير متوقع");
     } finally {
@@ -363,6 +388,19 @@ export function CaseIntakeStep2Form({
               </label>
             ))}
           </div>
+
+          {mandateNature.has("OTHER") && (
+            <div className="flex flex-col gap-1.5 rounded-md border p-3">
+              <Label className="text-xs">بنود «أخرى» — اكتب كل بند في مربع مستقل</Label>
+              <EditableStringList
+                items={mandateNatureOther}
+                onChange={setMandateNatureOther}
+                placeholder="مثال: تقييم أصول عينية"
+                compact
+              />
+            </div>
+          )}
+
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="mandateNotes">ملاحظات على المأمورية</Label>
             <Textarea

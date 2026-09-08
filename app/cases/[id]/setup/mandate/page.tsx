@@ -47,9 +47,16 @@ export default async function CaseMandateSetupPage({
         appointmentCapacity: (caseRecord.appointmentCapacity as AppointmentCapacity) ?? "SOLE_EXPERT",
         committeeMembers: safeParseJson<CommitteeMemberRecord[]>(caseRecord.committeeMembers, []),
         mandateNature: safeParseJson<MandateNatureOption[]>(caseRecord.mandateNature, []),
+        mandateNatureOther: safeParseJson<string[]>(caseRecord.mandateNatureOther, []),
         mandateNotes: caseRecord.mandateNotes,
       }
     : undefined;
+
+  // دعوى مكتملة الفتح بالفعل (ACTIVE) تصل هذه الصفحة عبر "تعديل بيانات
+  // المأمورية" من مركز الدعوى (CaseHub) — تحرير لاحق حر، وليس جزءاً من
+  // معالج الفتح، فلا معنى لعرض شريط تقدّم المعالج أو إعادته إلى مرحلة
+  // رفع المستندات بعد الحفظ.
+  const isActiveCase = caseRecord.intakeStatus === "ACTIVE";
 
   return (
     <div className="flex min-h-full flex-col">
@@ -58,11 +65,17 @@ export default async function CaseMandateSetupPage({
         <div className="mb-6">
           <h1 className="text-2xl font-bold">بيانات مأمورية الخبرة</h1>
           <p className="text-sm text-muted-foreground">
-            المرحلة 2 من 4 — الدعوى رقم {caseRecord.caseNumber}
+            {isActiveCase
+              ? `تعديل بيانات المأمورية — الدعوى رقم ${caseRecord.caseNumber}`
+              : `المرحلة 2 من 4 — الدعوى رقم ${caseRecord.caseNumber}`}
           </p>
         </div>
-        <WizardSteps current={2} />
-        <CaseIntakeStep2Form caseId={id} initialData={initialData} />
+        {!isActiveCase && <WizardSteps current={2} />}
+        <CaseIntakeStep2Form
+          caseId={id}
+          initialData={initialData}
+          redirectTo={isActiveCase ? `/cases/${id}` : undefined}
+        />
       </main>
     </div>
   );

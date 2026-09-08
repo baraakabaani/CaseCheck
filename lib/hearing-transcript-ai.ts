@@ -25,6 +25,7 @@ import {
   type ResolvedAiKey,
 } from "./ai-client";
 import { tokenize, tokenSet, tokenCoverage } from "./text-normalize";
+import { extractJson } from "./ai-json";
 
 const CHARS_PER_TOKEN = 3; // نفس المعيار التقريبي المستخدم في lib/smart-ingest.ts
 const TRANSCRIPT_TOKEN_BUDGET = 4000; // ميزانية كل جزء/طلب على حدة، وليس النص كاملاً
@@ -98,20 +99,6 @@ const SYSTEM_PROMPT = `أنت مساعد قانوني متخصص في مراجع
 
 لا تخترع أي كلام أو سؤال أو إجابة غير موجودة فعلياً في النص. إن كان جزء من النص غير مفهوم تماماً، أبقه كما هو مع علامة [غير واضح] بدل تخمين محتواه. أجب بالعربية الفصحى. يجب أن يكون ردك بصيغة JSON صالحة فقط، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown، مطابقاً تماماً للمخطط التالي:
 ${AI_JSON_SCHEMA}`;
-
-function extractJson(raw: string): unknown {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("لم يتم العثور على JSON صالح في رد النموذج");
-    }
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
-}
 
 function buildQuestionsBlock(questions: TranscriptCorrectionQuestion[]): string {
   return questions

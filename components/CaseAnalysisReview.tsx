@@ -25,7 +25,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import Link from "next/link";
-import { Loader2, CheckCircle2, Sparkles, Mail, ArrowRight, Pencil, Plus, Trash2, X, Save } from "lucide-react";
+import { Loader2, CheckCircle2, Sparkles, Mail, ArrowRight, Pencil, Plus, Trash2, Save } from "lucide-react";
+import { EditableStringList } from "@/components/EditableStringList";
 import type {
   MissingDocumentItem,
   ReceivedDocumentSummary,
@@ -60,50 +61,6 @@ function parseAnalysis(analysis: CaseAnalysisDetail): ParsedAnalysis {
   };
 }
 
-/** محرر قائمة نصوص بسيطة (مهام المأمورية، نقاط الإيضاح، الأسئلة المقترحة،
- * ملاحظات الخبير) — نفس الشكل في كل الحالات: سطر واحد لكل عنصر، حذف/إضافة
- * حرة. يُستخدَم بدل عرض <ol>/<ul> للقراءة فقط حين وضع التعديل مفعَّل. */
-function EditableStringList({
-  items,
-  onChange,
-  placeholder,
-  ordered,
-}: {
-  items: string[];
-  onChange: (next: string[]) => void;
-  placeholder?: string;
-  ordered?: boolean;
-}) {
-  function update(i: number, value: string) {
-    onChange(items.map((it, idx) => (idx === i ? value : it)));
-  }
-  function remove(i: number) {
-    onChange(items.filter((_, idx) => idx !== i));
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      {items.map((item, i) => (
-        <div key={i} className="flex items-start gap-2">
-          {ordered && <span className="mt-2 shrink-0 text-xs tabular-nums text-muted-foreground">{i + 1}.</span>}
-          <Textarea
-            rows={2}
-            value={item}
-            onChange={(e) => update(i, e.target.value)}
-            placeholder={placeholder}
-            className="flex-1 text-justify leading-6"
-          />
-          <Button type="button" variant="ghost" size="icon" className="mt-1 shrink-0" onClick={() => remove(i)}>
-            <X className="size-4" />
-          </Button>
-        </div>
-      ))}
-      <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => onChange([...items, ""])}>
-        <Plus className="size-4" />
-        إضافة
-      </Button>
-    </div>
-  );
-}
 
 export function CaseAnalysisReview({
   caseId,

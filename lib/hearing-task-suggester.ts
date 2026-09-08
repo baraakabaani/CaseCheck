@@ -10,6 +10,7 @@
 // العمل دون داعٍ حقيقي — الإضافة وحدها آمنة تماماً.
 
 import { z } from "zod";
+import { extractJson } from "./ai-json";
 import {
   createAiClient,
   resolveAiKeys,
@@ -45,20 +46,6 @@ const SYSTEM_PROMPT = `أنت مساعد خبير حسابي قضائي في د�
 
 أجب بالعربية الفصحى. يجب أن يكون ردك بصيغة JSON صالحة فقط، دون أي نص إضافي قبله أو بعده ودون أي تنسيق Markdown، وفق المخطط التالي بالضبط:
 {"suggestions": [{"taskText": "string", "groundingExcerpt": "string"}]}`;
-
-function extractJson(raw: string): unknown {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("لم يتم العثور على JSON صالح في رد النموذج");
-    }
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
-}
 
 const MAX_TRANSCRIPT_CHARS = 20_000;
 

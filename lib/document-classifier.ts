@@ -15,6 +15,7 @@ import {
 import { DOC_CATEGORIES, type DocCategory } from "./schemas";
 import { DOC_CATEGORY_LABELS } from "./case-intake-labels";
 import { z } from "zod";
+import { extractJson } from "./ai-json";
 
 export type ClassifiableCategory = Exclude<DocCategory, "UNSPECIFIED">;
 export const CLASSIFIABLE_CATEGORIES = DOC_CATEGORIES.filter(
@@ -72,20 +73,6 @@ const aiResultSchema = z.object({
     }),
   ),
 });
-
-function extractJson(raw: string): unknown {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("لم يتم العثور على JSON صالح في رد النموذج");
-    }
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
-}
 
 const CATEGORY_GUIDE = CLASSIFIABLE_CATEGORIES.map((c) => `${c} = ${DOC_CATEGORY_LABELS[c]}`).join("، ");
 

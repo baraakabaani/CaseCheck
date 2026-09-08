@@ -11,6 +11,7 @@ import {
   type ClientApiKeys,
   type ResolvedAiKey,
 } from "./ai-client";
+import { extractJson } from "./ai-json";
 
 export interface EmailCaseContext {
   caseNumber: string;
@@ -91,20 +92,6 @@ ${bulletLines}
     subject: `طلب استكمال مستندات — الدعوى رقم ${caseCtx.caseNumber}`,
     bodyAr,
   };
-}
-
-function extractJson(raw: string): unknown {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("لم يتم العثور على JSON صالح في رد النموذج");
-    }
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
 }
 
 async function callAiForEmail(

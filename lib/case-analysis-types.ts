@@ -30,4 +30,6 @@ export interface CaseAnalyzerContext {
   caseCategoryLabel?: string | null;
   title?: string | null;
   mandateNature: MandateNatureOption[];
+  /** بنود "أخرى" حرة كتبها الخبير — انظر Case.mandateNatureOther */
+  mandateNatureOther?: string[];
 }

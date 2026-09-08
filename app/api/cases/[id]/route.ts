@@ -52,6 +52,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     title,
     committeeMembers,
     mandateNature,
+    mandateNatureOther,
     mandateDecisionDate,
     mandateReceivedDate,
     mandateAcceptedDate,
@@ -65,6 +66,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   if (clientEmail !== undefined) data.clientEmail = clientEmail || null;
   if (committeeMembers !== undefined) data.committeeMembers = JSON.stringify(committeeMembers);
   if (mandateNature !== undefined) data.mandateNature = JSON.stringify(mandateNature);
+  if (mandateNatureOther !== undefined) data.mandateNatureOther = JSON.stringify(mandateNatureOther);
   if (mandateDecisionDate !== undefined) data.mandateDecisionDate = new Date(mandateDecisionDate);
   if (mandateReceivedDate !== undefined) {
     data.mandateReceivedDate = mandateReceivedDate ? new Date(mandateReceivedDate) : null;

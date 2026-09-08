@@ -16,6 +16,7 @@ import {
   ArrowLeft,
   Loader2,
   Trash2,
+  Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { HEARING_STATUS_LABELS } from "@/lib/case-hub-labels";
@@ -193,14 +194,22 @@ export function CaseHub({ caseDetail }: { caseDetail: CaseDetail }) {
               </p>
             )}
           </div>
-          <Button variant="outline" onClick={handleDeleteCase} disabled={deleting}>
-            {deleting ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Trash2 className="size-4 text-destructive" />
-            )}
-            حذف ملف الدعوى
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" asChild>
+              <Link href={`/cases/${caseDetail.id}/setup/mandate`}>
+                <Settings2 className="size-4" />
+                تعديل بيانات المأمورية
+              </Link>
+            </Button>
+            <Button variant="outline" onClick={handleDeleteCase} disabled={deleting}>
+              {deleting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4 text-destructive" />
+              )}
+              حذف ملف الدعوى
+            </Button>
+          </div>
         </div>
       </div>
 

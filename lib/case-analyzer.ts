@@ -26,6 +26,7 @@ import {
 import { buildSmartIngestPayload, type SmartIngestDocument } from "./smart-ingest";
 import { offlineAnalyzeCaseFile } from "./offline-case-analyzer";
 import { MANDATE_NATURE_LABELS } from "./case-intake-labels";
+import { extractJson } from "./ai-json";
 import type {
   CaseAnalyzerContext,
   CaseAnalyzerDocument,
@@ -93,20 +94,6 @@ function buildPartiesBlock(parties: CaseAnalyzerParty[]): string {
     .join("\n");
 }
 
-function extractJson(raw: string): unknown {
-  const trimmed = raw.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("لم يتم العثور على JSON صالح في رد النموذج");
-    }
-    return JSON.parse(trimmed.slice(start, end + 1));
-  }
-}
-
 async function callAiForAnalysis(
   resolved: ResolvedAiKey,
   caseCtx: CaseAnalyzerContext,
@@ -115,9 +102,10 @@ async function callAiForAnalysis(
 ): Promise<{ result: CaseAnalysisResult; truncationNote?: string }> {
   const client = createAiClient(resolved);
 
-  const mandateNatureLabels = caseCtx.mandateNature
-    .map((n) => MANDATE_NATURE_LABELS[n])
-    .join("، ");
+  const mandateNatureLabels = [
+    ...caseCtx.mandateNature.map((n) => MANDATE_NATURE_LABELS[n]),
+    ...(caseCtx.mandateNatureOther ?? []),
+  ].join("، ");
 
   const ingestDocs: SmartIngestDocument[] = documents.map((d) => ({
     id: d.id,
@@ -156,11 +144,16 @@ ${payload.promptJson}
   const completion = await client.chat.completions.create({
     model: resolved.model,
     temperature: 0.3,
-    // Freed up from 2500 now that lib/smart-ingest.ts keeps the prompt
-    // itself small and bounded regardless of source document sizes — this
-    // headroom is for the *output* JSON (receivedDocuments/missingDocuments
-    // arrays), which is what was actually getting cut off before.
-    max_tokens: 3000,
+    // Raised from 3000 → 7000: a real production case with several
+    // documents and issues still hit finish_reason "length" at 3000,
+    // truncating mid-array (the exact "Expected ',' or ']' after array
+    // element" class of error extractJson's repair step in ./ai-json now
+    // also guards against, but the real fix is simply giving the 8-field
+    // schema below — several of them arrays of objects — enough room to
+    // finish. lib/smart-ingest.ts already keeps the *input* prompt small
+    // and bounded regardless of source document sizes; this budget is
+    // purely for the output JSON.
+    max_tokens: 7000,
     // See AiChatParams.reasoning_effort — without this, Gemini spends an
     // unpredictable share of max_tokens on hidden thinking and can return
     // truncated/invalid JSON (verified live against this exact prompt).

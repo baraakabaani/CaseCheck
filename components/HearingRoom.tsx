@@ -11,6 +11,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -30,9 +38,13 @@ import {
   Mic,
   Square,
   FileAudio,
+  ListPlus,
+  Quote,
 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
 import { buildHearingMinutesDocxBlob, downloadBlob } from "@/lib/docx-export";
+import { buildClientApiKeyHeaders } from "@/lib/client-api-key";
+import type { SuggestedTask } from "@/lib/hearing-task-suggester";
 import {
   ATTENDANCE_STATUSES,
   HEARING_QUESTION_PARTY_ROLES,
@@ -527,6 +539,75 @@ function TranscriptCard({
   const fileInput = useRef<HTMLInputElement>(null);
   const audioFileInput = useRef<HTMLInputElement>(null);
 
+  // --- استخراج مهام جديدة من المحضر المصحَّح (تُضاف فقط، لا تُعدَّل أي
+  // مهمة موجودة — انظر lib/hearing-task-suggester.ts) ---
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestDialogOpen, setSuggestDialogOpen] = useState(false);
+  const [suggestAnalysisId, setSuggestAnalysisId] = useState<string | null>(null);
+  const [suggestExistingTasks, setSuggestExistingTasks] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<SuggestedTask[]>([]);
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<number>>(new Set());
+  const [addingTasks, setAddingTasks] = useState(false);
+
+  async function handleSuggestTasks() {
+    setSuggesting(true);
+    try {
+      const res = await fetch(`/api/cases/${caseId}/hearing-sessions/${session.id}/suggest-tasks`, {
+        method: "POST",
+        headers: buildClientApiKeyHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل استخراج المهام من المحضر");
+
+      if (data.warning) toast.warning(data.warning);
+      setSuggestAnalysisId(data.analysisId);
+      setSuggestExistingTasks(data.existingTasks);
+      setSuggestions(data.suggestions);
+      setSelectedSuggestions(new Set((data.suggestions as SuggestedTask[]).map((_, i) => i)));
+      if (data.suggestions.length === 0 && !data.warning) {
+        toast.success("لم يستجد أي مهمة جديدة لم تكن مغطاة بالفعل في مهام المأمورية الحالية");
+      } else if (data.suggestions.length > 0) {
+        setSuggestDialogOpen(true);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "فشل استخراج المهام من المحضر");
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  function toggleSuggestion(i: number) {
+    setSelectedSuggestions((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  async function handleAddSelectedTasks() {
+    if (!suggestAnalysisId || selectedSuggestions.size === 0) return;
+    setAddingTasks(true);
+    try {
+      const tasksToAdd = suggestions.filter((_, i) => selectedSuggestions.has(i)).map((s) => s.taskText);
+      const res = await fetch(`/api/cases/${caseId}/analysis/${suggestAnalysisId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mandateTasks: [...suggestExistingTasks, ...tasksToAdd] }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "فشل إضافة المهام");
+
+      toast.success(`تمت إضافة ${tasksToAdd.length} مهمة إلى مأمورية الخبرة`);
+      setSuggestDialogOpen(false);
+      onChanged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "فشل إضافة المهام");
+    } finally {
+      setAddingTasks(false);
+    }
+  }
+
   // --- تسجيل الاجتماع مباشرة من المتصفح (MediaRecorder) ---
   const [recordingState, setRecordingState] = useState<"idle" | "recording" | "recorded">("idle");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -771,9 +852,60 @@ function TranscriptCard({
             <div className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm">
               {session.correctedTranscript}
             </div>
+            <div>
+              <Button variant="outline" size="sm" onClick={handleSuggestTasks} disabled={suggesting}>
+                {suggesting ? <Loader2 className="size-4 animate-spin" /> : <ListPlus className="size-4" />}
+                استخراج مهام من المحضر
+              </Button>
+            </div>
           </div>
         )}
       </CardContent>
+
+      <Dialog open={suggestDialogOpen} onOpenChange={setSuggestDialogOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>مهام مقترَحة من المحضر</DialogTitle>
+            <DialogDescription>
+              راجع كل اقتراح واقتباسه من المحضر، وحدد ما تريد إضافته فعلياً إلى مأمورية
+              الخبرة — لن يُعدَّل أو يُحذَف أي شيء من المهام المعتمدة حالياً، فقط إضافة ما
+              تختاره أنت.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-3">
+            {suggestions.map((s, i) => (
+              <label
+                key={i}
+                className="flex cursor-pointer flex-col gap-1.5 rounded-md border p-3 hover:bg-muted/30"
+              >
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    checked={selectedSuggestions.has(i)}
+                    onCheckedChange={() => toggleSuggestion(i)}
+                    className="mt-0.5"
+                  />
+                  <span className="text-sm font-medium">{s.taskText}</span>
+                </div>
+                <div className="flex items-start gap-1.5 ps-6 text-xs text-muted-foreground">
+                  <Quote className="size-3.5 shrink-0" />
+                  <span className="italic">{s.groundingExcerpt}</span>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSuggestDialogOpen(false)}>
+              إلغاء
+            </Button>
+            <Button onClick={handleAddSelectedTasks} disabled={addingTasks || selectedSuggestions.size === 0}>
+              {addingTasks ? <Loader2 className="size-4 animate-spin" /> : <ListPlus className="size-4" />}
+              إضافة المحدد ({selectedSuggestions.size})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
